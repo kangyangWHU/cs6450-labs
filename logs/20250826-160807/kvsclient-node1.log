@@ -1,0 +1,6 @@
+hosts [node0:8080]
+theta 0.99
+workload YCSB-B
+secs 30
+Client 7 finished operations.
+throughput 5492.23 ops/s

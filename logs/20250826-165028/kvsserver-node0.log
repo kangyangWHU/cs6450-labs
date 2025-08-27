@@ -1,0 +1,674 @@
+Starting KVS server on :8080
+get/s 0.00
+put/s 0.00
+ops/s 0.00
+
+get/s 0.00
+put/s 0.00
+ops/s 0.00
+
+get/s 0.00
+put/s 0.00
+ops/s 0.00
+
+fatal error: concurrent map read and map write
+
+goroutine 118 [running]:
+internal/runtime/maps.fatal({0x89b422?, 0xc000294200?})
+	/usr/local/go/src/runtime/panic.go:1046 +0x18
+main.(*KVService).Get(0x0?, 0x2?, 0xc000484290)
+	/mnt/nfs/HaoRen/cs6450-labs/kvs/server/main.go:49 +0x31
+reflect.Value.call({0xc0000926c0?, 0xc0000661b0?, 0x13?}, {0x888974, 0x4}, {0xc000413ef8, 0x3, 0x3?})
+	/usr/local/go/src/reflect/value.go:581 +0xcc6
+reflect.Value.Call({0xc0000926c0?, 0xc0000661b0?, 0x41df94?}, {0xc0002126f8?, 0x0?, 0x0?})
+	/usr/local/go/src/reflect/value.go:365 +0xb9
+net/rpc.(*service).call(0xc0000911c0, 0xc25860, 0xc0003942d0, 0xc0003942e0, 0xc00002c280, 0xc000294460, {0x7ea960?, 0xc000484270?, 0x6a7745?}, {0x7ea9e0, ...}, ...)
+	/usr/local/go/src/net/rpc/server.go:383 +0x209
+created by net/rpc.(*Server).ServeCodec in goroutine 141
+	/usr/local/go/src/net/rpc/server.go:480 +0x3de
+
+goroutine 1 [runnable]:
+syscall.Syscall6(0x120, 0x4, 0xc0000e1ab4, 0xc0000e1b24, 0x80800, 0x0, 0x0)
+	/usr/local/go/src/syscall/syscall_linux.go:96 +0x39
+syscall.accept4(0xc0000e1ab0?, 0xc0000e1b00?, 0xc0000e1b00?, 0x4d553e?)
+	/usr/local/go/src/syscall/zsyscall_linux_amd64.go:1401 +0x3d
+syscall.Accept4(0x72?, 0x0?)
+	/usr/local/go/src/syscall/syscall_linux.go:694 +0x56
+internal/poll.accept(0xc00002c400?)
+	/usr/local/go/src/internal/poll/sock_cloexec.go:17 +0x1f
+internal/poll.(*FD).Accept(0xc00002c400)
+	/usr/local/go/src/internal/poll/fd_unix.go:604 +0x1ad
+net.(*netFD).accept(0xc00002c400)
+	/usr/local/go/src/net/fd_unix.go:161 +0x29
+net.(*TCPListener).accept(0xc000091440)
+	/usr/local/go/src/net/tcpsock_posix.go:159 +0x1b
+net.(*TCPListener).Accept(0xc000091440)
+	/usr/local/go/src/net/tcpsock.go:380 +0x30
+net/http.(*Server).Serve(0xc000016300, {0x932718, 0xc000091440})
+	/usr/local/go/src/net/http/server.go:3463 +0x30c
+net/http.Serve(...)
+	/usr/local/go/src/net/http/server.go:2971
+main.main()
+	/mnt/nfs/HaoRen/cs6450-labs/kvs/server/main.go:124 +0x2b4
+
+goroutine 8 [sleep]:
+time.Sleep(0x3b9aca00)
+	/usr/local/go/src/runtime/time.go:363 +0x165
+main.main.func1()
+	/mnt/nfs/HaoRen/cs6450-labs/kvs/server/main.go:120 +0x26
+created by main.main in goroutine 1
+	/mnt/nfs/HaoRen/cs6450-labs/kvs/server/main.go:117 +0x298
+
+goroutine 18 [IO wait]:
+internal/poll.runtime_pollWait(0x777761ab4200, 0x72)
+	/usr/local/go/src/runtime/netpoll.go:351 +0x85
+internal/poll.(*pollDesc).wait(0xc00011a000?, 0xc000149000?, 0x0)
+	/usr/local/go/src/internal/poll/fd_poll_runtime.go:84 +0x27
+internal/poll.(*pollDesc).waitRead(...)
+	/usr/local/go/src/internal/poll/fd_poll_runtime.go:89
+internal/poll.(*FD).Read(0xc00011a000, {0xc000149000, 0x1000, 0x1000})
+	/usr/local/go/src/internal/poll/fd_unix.go:165 +0x279
+net.(*netFD).Read(0xc00011a000, {0xc000149000?, 0x4?, 0x198?})
+	/usr/local/go/src/net/fd_posix.go:68 +0x25
+net.(*conn).Read(0xc00011e000, {0xc000149000?, 0xc000025550?, 0x41374d?})
+	/usr/local/go/src/net/net.go:196 +0x45
+bufio.(*Reader).Read(0xc00012c0c0, {0xc000112040, 0x1, 0xc000122160?})
+	/usr/local/go/src/bufio/bufio.go:245 +0x197
+io.ReadAtLeast({0x92f9e0, 0xc00012c0c0}, {0xc000112040, 0x1, 0x9}, 0x1)
+	/usr/local/go/src/io/io.go:335 +0x8e
+io.ReadFull(...)
+	/usr/local/go/src/io/io.go:354
+encoding/gob.decodeUintReader({0x92f9e0, 0xc00012c0c0}, {0xc000112040, 0x9, 0x9})
+	/usr/local/go/src/encoding/gob/decode.go:116 +0x51
+encoding/gob.(*Decoder).recvMessage(0xc0001201b0)
+	/usr/local/go/src/encoding/gob/decoder.go:84 +0x33
+encoding/gob.(*Decoder).decodeTypeSequence(0xc0001201b0, 0x0)
+	/usr/local/go/src/encoding/gob/decoder.go:150 +0x47
+encoding/gob.(*Decoder).DecodeValue(0xc0001201b0, {0x7ea620?, 0xc00041c000?, 0x49c709?})
+	/usr/local/go/src/encoding/gob/decoder.go:229 +0x16e
+encoding/gob.(*Decoder).Decode(0xc0001201b0?, {0x7ea620?, 0xc00041c000?})
+	/usr/local/go/src/encoding/gob/decoder.go:206 +0xdc
+net/rpc.(*gobServerCodec).ReadRequestHeader(0xc25860?, 0x7777a8f49d58?)
+	/usr/local/go/src/net/rpc/server.go:403 +0x25
+net/rpc.(*Server).readRequestHeader(0xc25860, {0x932d58, 0xc00011c240})
+	/usr/local/go/src/net/rpc/server.go:589 +0x58
+net/rpc.(*Server).readRequest(0xc000072950?, {0x932d58, 0xc00011c240})
+	/usr/local/go/src/net/rpc/server.go:549 +0x2f
+net/rpc.(*Server).ServeCodec(0xc25860, {0x932d58, 0xc00011c240})
+	/usr/local/go/src/net/rpc/server.go:464 +0x71
+net/rpc.(*Server).ServeConn(0xc25860, {0x777761262098, 0xc00011e000})
+	/usr/local/go/src/net/rpc/server.go:455 +0x34f
+net/rpc.(*Server).ServeHTTP(0xc25860, {0x932868?, 0xc000134000}, 0xc000130000)
+	/usr/local/go/src/net/rpc/server.go:710 +0x3cd
+net/http.(*ServeMux).ServeHTTP(0x479719?, {0x932868, 0xc000134000}, 0xc000130000)
+	/usr/local/go/src/net/http/server.go:2861 +0x1c7
+net/http.serverHandler.ServeHTTP({0xc000126000?}, {0x932868?, 0xc000134000?}, 0x1?)
+	/usr/local/go/src/net/http/server.go:3340 +0x8e
+net/http.(*conn).serve(0xc000120000, {0x932e18, 0xc0000e7e60})
+	/usr/local/go/src/net/http/server.go:2109 +0x665
+created by net/http.(*Server).Serve in goroutine 1
+	/usr/local/go/src/net/http/server.go:3493 +0x485
+
+goroutine 9 [runnable]:
+syscall.Syscall(0x0, 0x8, 0xc000287000, 0x1000)
+	/usr/local/go/src/syscall/syscall_linux.go:74 +0x25
+syscall.read(0xc00002c500?, {0xc000287000?, 0xc0002af400?, 0x47a479?})
+	/usr/local/go/src/syscall/zsyscall_linux_amd64.go:736 +0x38
+syscall.Read(...)
+	/usr/local/go/src/syscall/syscall_unix.go:183
+internal/poll.ignoringEINTRIO(...)
+	/usr/local/go/src/internal/poll/fd_unix.go:738
+internal/poll.(*FD).Read(0xc00002c500, {0xc000287000, 0x1000, 0x1000})
+	/usr/local/go/src/internal/poll/fd_unix.go:161 +0x2ae
+net.(*netFD).Read(0xc00002c500, {0xc000287000?, 0x5?, 0x198?})
+	/usr/local/go/src/net/fd_posix.go:68 +0x25
+net.(*conn).Read(0xc000066288, {0xc000287000?, 0xc0002af550?, 0x41374d?})
+	/usr/local/go/src/net/net.go:196 +0x45
+bufio.(*Reader).Read(0xc00028c000, {0xc000290000, 0x1, 0xc000294120?})
+	/usr/local/go/src/bufio/bufio.go:245 +0x197
+io.ReadAtLeast({0x92f9e0, 0xc00028c000}, {0xc000290000, 0x1, 0x9}, 0x1)
+	/usr/local/go/src/io/io.go:335 +0x8e
+io.ReadFull(...)
+	/usr/local/go/src/io/io.go:354
+encoding/gob.decodeUintReader({0x92f9e0, 0xc00028c000}, {0xc000290000, 0x9, 0x9})
+	/usr/local/go/src/encoding/gob/decode.go:116 +0x51
+encoding/gob.(*Decoder).recvMessage(0xc00028a000)
+	/usr/local/go/src/encoding/gob/decoder.go:84 +0x33
+encoding/gob.(*Decoder).decodeTypeSequence(0xc00028a000, 0x0)
+	/usr/local/go/src/encoding/gob/decoder.go:150 +0x47
+encoding/gob.(*Decoder).DecodeValue(0xc00028a000, {0x7ea620?, 0xc00007aa60?, 0x49c709?})
+	/usr/local/go/src/encoding/gob/decoder.go:229 +0x16e
+encoding/gob.(*Decoder).Decode(0xc00028a000?, {0x7ea620?, 0xc00007aa60?})
+	/usr/local/go/src/encoding/gob/decoder.go:206 +0xdc
+net/rpc.(*gobServerCodec).ReadRequestHeader(0xc25860?, 0x7777a8f4ab80?)
+	/usr/local/go/src/net/rpc/server.go:403 +0x25
+net/rpc.(*Server).readRequestHeader(0xc25860, {0x932d58, 0xc00028e0c0})
+	/usr/local/go/src/net/rpc/server.go:589 +0x58
+net/rpc.(*Server).readRequest(0xc000078950?, {0x932d58, 0xc00028e0c0})
+	/usr/local/go/src/net/rpc/server.go:549 +0x2f
+net/rpc.(*Server).ServeCodec(0xc25860, {0x932d58, 0xc00028e0c0})
+	/usr/local/go/src/net/rpc/server.go:464 +0x71
+net/rpc.(*Server).ServeConn(0xc25860, {0x777761262098, 0xc000066288})
+	/usr/local/go/src/net/rpc/server.go:455 +0x34f
+net/rpc.(*Server).ServeHTTP(0xc25860, {0x932868?, 0xc0000fe1e0}, 0xc0000ee280)
+	/usr/local/go/src/net/rpc/server.go:710 +0x3cd
+net/http.(*ServeMux).ServeHTTP(0x479719?, {0x932868, 0xc0000fe1e0}, 0xc0000ee280)
+	/usr/local/go/src/net/http/server.go:2861 +0x1c7
+net/http.serverHandler.ServeHTTP({0xc000091480?}, {0x932868?, 0xc0000fe1e0?}, 0x1?)
+	/usr/local/go/src/net/http/server.go:3340 +0x8e
+net/http.(*conn).serve(0xc0000da3f0, {0x932e18, 0xc0000e7e60})
+	/usr/local/go/src/net/http/server.go:2109 +0x665
+created by net/http.(*Server).Serve in goroutine 1
+	/usr/local/go/src/net/http/server.go:3493 +0x485
+
+goroutine 34 [runnable]:
+internal/poll.runtime_pollWait(0x777761ab3e00, 0x72)
+	/usr/local/go/src/runtime/netpoll.go:351 +0x85
+internal/poll.(*pollDesc).wait(0xc000202000?, 0xc0001a5000?, 0x0)
+	/usr/local/go/src/internal/poll/fd_poll_runtime.go:84 +0x27
+internal/poll.(*pollDesc).waitRead(...)
+	/usr/local/go/src/internal/poll/fd_poll_runtime.go:89
+internal/poll.(*FD).Read(0xc000202000, {0xc0001a5000, 0x1000, 0x1000})
+	/usr/local/go/src/internal/poll/fd_unix.go:165 +0x279
+net.(*netFD).Read(0xc000202000, {0xc0001a5000?, 0xc0002ab528?, 0x4365db?})
+	/usr/local/go/src/net/fd_posix.go:68 +0x25
+net.(*conn).Read(0xc000206000, {0xc0001a5000?, 0xc0002ab558?, 0x421b25?})
+	/usr/local/go/src/net/net.go:196 +0x45
+bufio.(*Reader).Read(0xc000092b40, {0xc000012370, 0x1, 0xc00007a940?})
+	/usr/local/go/src/bufio/bufio.go:245 +0x197
+io.ReadAtLeast({0x92f9e0, 0xc000092b40}, {0xc000012370, 0x1, 0x9}, 0x1)
+	/usr/local/go/src/io/io.go:335 +0x8e
+io.ReadFull(...)
+	/usr/local/go/src/io/io.go:354
+encoding/gob.decodeUintReader({0x92f9e0, 0xc000092b40}, {0xc000012370, 0x9, 0x9})
+	/usr/local/go/src/encoding/gob/decode.go:116 +0x51
+encoding/gob.(*Decoder).recvMessage(0xc0000da5a0)
+	/usr/local/go/src/encoding/gob/decoder.go:84 +0x33
+encoding/gob.(*Decoder).decodeTypeSequence(0xc0000da5a0, 0x0)
+	/usr/local/go/src/encoding/gob/decoder.go:150 +0x47
+encoding/gob.(*Decoder).DecodeValue(0xc0000da5a0, {0x7ea620?, 0xc00059c000?, 0x84b340?})
+	/usr/local/go/src/encoding/gob/decoder.go:229 +0x16e
+encoding/gob.(*Decoder).Decode(0xc0000da5a0?, {0x7ea620?, 0xc00059c000?})
+	/usr/local/go/src/encoding/gob/decoder.go:206 +0xdc
+net/rpc.(*gobServerCodec).ReadRequestHeader(0xc25860?, 0x7777a8f4ab80?)
+	/usr/local/go/src/net/rpc/server.go:403 +0x25
+net/rpc.(*Server).readRequestHeader(0xc25860, {0x932d58, 0xc0001941e0})
+	/usr/local/go/src/net/rpc/server.go:589 +0x58
+net/rpc.(*Server).readRequest(0xc000079950?, {0x932d58, 0xc0001941e0})
+	/usr/local/go/src/net/rpc/server.go:549 +0x2f
+net/rpc.(*Server).ServeCodec(0xc25860, {0x932d58, 0xc0001941e0})
+	/usr/local/go/src/net/rpc/server.go:464 +0x71
+net/rpc.(*Server).ServeConn(0xc25860, {0x777761262098, 0xc000206000})
+	/usr/local/go/src/net/rpc/server.go:455 +0x34f
+net/rpc.(*Server).ServeHTTP(0xc25860, {0x932868?, 0xc0000fe2d0}, 0xc0000ee3c0)
+	/usr/local/go/src/net/rpc/server.go:710 +0x3cd
+net/http.(*ServeMux).ServeHTTP(0x479719?, {0x932868, 0xc0000fe2d0}, 0xc0000ee3c0)
+	/usr/local/go/src/net/http/server.go:2861 +0x1c7
+net/http.serverHandler.ServeHTTP({0xc000091580?}, {0x932868?, 0xc0000fe2d0?}, 0x1?)
+	/usr/local/go/src/net/http/server.go:3340 +0x8e
+net/http.(*conn).serve(0xc000208000, {0x932e18, 0xc0000e7e60})
+	/usr/local/go/src/net/http/server.go:2109 +0x665
+created by net/http.(*Server).Serve in goroutine 1
+	/usr/local/go/src/net/http/server.go:3493 +0x485
+
+goroutine 35 [IO wait]:
+internal/poll.runtime_pollWait(0x777761ab3c00, 0x72)
+	/usr/local/go/src/runtime/netpoll.go:351 +0x85
+internal/poll.(*pollDesc).wait(0xc000202080?, 0xc000307000?, 0x0)
+	/usr/local/go/src/internal/poll/fd_poll_runtime.go:84 +0x27
+internal/poll.(*pollDesc).waitRead(...)
+	/usr/local/go/src/internal/poll/fd_poll_runtime.go:89
+internal/poll.(*FD).Read(0xc000202080, {0xc000307000, 0x1000, 0x1000})
+	/usr/local/go/src/internal/poll/fd_unix.go:165 +0x279
+net.(*netFD).Read(0xc000202080, {0xc000307000?, 0x2?, 0x198?})
+	/usr/local/go/src/net/fd_posix.go:68 +0x25
+net.(*conn).Read(0xc000206008, {0xc000307000?, 0xc000327550?, 0x41374d?})
+	/usr/local/go/src/net/net.go:196 +0x45
+bufio.(*Reader).Read(0xc00030c000, {0xc000310000, 0x1, 0xc000318100?})
+	/usr/local/go/src/bufio/bufio.go:245 +0x197
+io.ReadAtLeast({0x92f9e0, 0xc00030c000}, {0xc000310000, 0x1, 0x9}, 0x1)
+	/usr/local/go/src/io/io.go:335 +0x8e
+io.ReadFull(...)
+	/usr/local/go/src/io/io.go:354
+encoding/gob.decodeUintReader({0x92f9e0, 0xc00030c000}, {0xc000310000, 0x9, 0x9})
+	/usr/local/go/src/encoding/gob/decode.go:116 +0x51
+encoding/gob.(*Decoder).recvMessage(0xc00030a000)
+	/usr/local/go/src/encoding/gob/decoder.go:84 +0x33
+encoding/gob.(*Decoder).decodeTypeSequence(0xc00030a000, 0x0)
+	/usr/local/go/src/encoding/gob/decoder.go:150 +0x47
+encoding/gob.(*Decoder).DecodeValue(0xc00030a000, {0x7ea620?, 0xc0002941e0?, 0x49c709?})
+	/usr/local/go/src/encoding/gob/decoder.go:229 +0x16e
+encoding/gob.(*Decoder).Decode(0xc00030a000?, {0x7ea620?, 0xc0002941e0?})
+	/usr/local/go/src/encoding/gob/decoder.go:206 +0xdc
+net/rpc.(*gobServerCodec).ReadRequestHeader(0xc25860?, 0x7777a8f485c0?)
+	/usr/local/go/src/net/rpc/server.go:403 +0x25
+net/rpc.(*Server).readRequestHeader(0xc25860, {0x932d58, 0xc00030e0c0})
+	/usr/local/go/src/net/rpc/server.go:589 +0x58
+net/rpc.(*Server).readRequest(0xc00021a950?, {0x932d58, 0xc00030e0c0})
+	/usr/local/go/src/net/rpc/server.go:549 +0x2f
+net/rpc.(*Server).ServeCodec(0xc25860, {0x932d58, 0xc00030e0c0})
+	/usr/local/go/src/net/rpc/server.go:464 +0x71
+net/rpc.(*Server).ServeConn(0xc25860, {0x777761262098, 0xc000206008})
+	/usr/local/go/src/net/rpc/server.go:455 +0x34f
+net/rpc.(*Server).ServeHTTP(0xc25860, {0x932868?, 0xc000232000}, 0xc00022a000)
+	/usr/local/go/src/net/rpc/server.go:710 +0x3cd
+net/http.(*ServeMux).ServeHTTP(0x479719?, {0x932868, 0xc000232000}, 0xc00022a000)
+	/usr/local/go/src/net/http/server.go:2861 +0x1c7
+net/http.serverHandler.ServeHTTP({0xc000224000?}, {0x932868?, 0xc000232000?}, 0x1?)
+	/usr/local/go/src/net/http/server.go:3340 +0x8e
+net/http.(*conn).serve(0xc000208090, {0x932e18, 0xc0000e7e60})
+	/usr/local/go/src/net/http/server.go:2109 +0x665
+created by net/http.(*Server).Serve in goroutine 1
+	/usr/local/go/src/net/http/server.go:3493 +0x485
+
+goroutine 91 [runnable]:
+internal/poll.runtime_pollWait(0x777761ab3600, 0x72)
+	/usr/local/go/src/runtime/netpoll.go:351 +0x85
+internal/poll.(*pollDesc).wait(0xc0003aa480?, 0xc0003d1000?, 0x0)
+	/usr/local/go/src/internal/poll/fd_poll_runtime.go:84 +0x27
+internal/poll.(*pollDesc).waitRead(...)
+	/usr/local/go/src/internal/poll/fd_poll_runtime.go:89
+internal/poll.(*FD).Read(0xc0003aa480, {0xc0003d1000, 0x1000, 0x1000})
+	/usr/local/go/src/internal/poll/fd_unix.go:165 +0x279
+net.(*netFD).Read(0xc0003aa480, {0xc0003d1000?, 0x1?, 0x198?})
+	/usr/local/go/src/net/fd_posix.go:68 +0x25
+net.(*conn).Read(0xc0003b2118, {0xc0003d1000?, 0xc0002cf550?, 0x41374d?})
+	/usr/local/go/src/net/net.go:196 +0x45
+bufio.(*Reader).Read(0xc0003c40c0, {0xc0003941b0, 0x1, 0xc0001223a0?})
+	/usr/local/go/src/bufio/bufio.go:245 +0x197
+io.ReadAtLeast({0x92f9e0, 0xc0003c40c0}, {0xc0003941b0, 0x1, 0x9}, 0x1)
+	/usr/local/go/src/io/io.go:335 +0x8e
+io.ReadFull(...)
+	/usr/local/go/src/io/io.go:354
+encoding/gob.decodeUintReader({0x92f9e0, 0xc0003c40c0}, {0xc0003941b0, 0x9, 0x9})
+	/usr/local/go/src/encoding/gob/decode.go:116 +0x51
+encoding/gob.(*Decoder).recvMessage(0xc0003b4750)
+	/usr/local/go/src/encoding/gob/decoder.go:84 +0x33
+encoding/gob.(*Decoder).decodeTypeSequence(0xc0003b4750, 0x0)
+	/usr/local/go/src/encoding/gob/decoder.go:150 +0x47
+encoding/gob.(*Decoder).DecodeValue(0xc0003b4750, {0x7ea620?, 0xc000122220?, 0x49c709?})
+	/usr/local/go/src/encoding/gob/decoder.go:229 +0x16e
+encoding/gob.(*Decoder).Decode(0xc0003b4750?, {0x7ea620?, 0xc000122220?})
+	/usr/local/go/src/encoding/gob/decoder.go:206 +0xdc
+net/rpc.(*gobServerCodec).ReadRequestHeader(0xc25860?, 0x7777a8f493e8?)
+	/usr/local/go/src/net/rpc/server.go:403 +0x25
+net/rpc.(*Server).readRequestHeader(0xc25860, {0x932d58, 0xc0003ae540})
+	/usr/local/go/src/net/rpc/server.go:589 +0x58
+net/rpc.(*Server).readRequest(0xc000216950?, {0x932d58, 0xc0003ae540})
+	/usr/local/go/src/net/rpc/server.go:549 +0x2f
+net/rpc.(*Server).ServeCodec(0xc25860, {0x932d58, 0xc0003ae540})
+	/usr/local/go/src/net/rpc/server.go:464 +0x71
+net/rpc.(*Server).ServeConn(0xc25860, {0x777761262098, 0xc0003b2118})
+	/usr/local/go/src/net/rpc/server.go:455 +0x34f
+net/rpc.(*Server).ServeHTTP(0xc25860, {0x932868?, 0xc0003cc000}, 0xc0003c8000)
+	/usr/local/go/src/net/rpc/server.go:710 +0x3cd
+net/http.(*ServeMux).ServeHTTP(0x479719?, {0x932868, 0xc0003cc000}, 0xc0003c8000)
+	/usr/local/go/src/net/http/server.go:2861 +0x1c7
+net/http.serverHandler.ServeHTTP({0xc000396540?}, {0x932868?, 0xc0003cc000?}, 0x1?)
+	/usr/local/go/src/net/http/server.go:3340 +0x8e
+net/http.(*conn).serve(0xc0003b4630, {0x932e18, 0xc0000e7e60})
+	/usr/local/go/src/net/http/server.go:2109 +0x665
+created by net/http.(*Server).Serve in goroutine 1
+	/usr/local/go/src/net/http/server.go:3493 +0x485
+
+goroutine 24 [runnable]:
+syscall.Syscall(0x0, 0xb, 0xc000161000, 0x1000)
+	/usr/local/go/src/syscall/syscall_linux.go:74 +0x25
+syscall.read(0xc00011a280?, {0xc000161000?, 0xc000323400?, 0x47a485?})
+	/usr/local/go/src/syscall/zsyscall_linux_amd64.go:736 +0x38
+syscall.Read(...)
+	/usr/local/go/src/syscall/syscall_unix.go:183
+internal/poll.ignoringEINTRIO(...)
+	/usr/local/go/src/internal/poll/fd_unix.go:738
+internal/poll.(*FD).Read(0xc00011a280, {0xc000161000, 0x1000, 0x1000})
+	/usr/local/go/src/internal/poll/fd_unix.go:161 +0x2ae
+net.(*netFD).Read(0xc00011a280, {0xc000161000?, 0x80?, 0x198?})
+	/usr/local/go/src/net/fd_posix.go:68 +0x25
+net.(*conn).Read(0xc00011e120, {0xc000161000?, 0xc000323550?, 0x41374d?})
+	/usr/local/go/src/net/net.go:196 +0x45
+bufio.(*Reader).Read(0xc00012c1e0, {0xc000112180, 0x1, 0xc0003ac120?})
+	/usr/local/go/src/bufio/bufio.go:245 +0x197
+io.ReadAtLeast({0x92f9e0, 0xc00012c1e0}, {0xc000112180, 0x1, 0x9}, 0x1)
+	/usr/local/go/src/io/io.go:335 +0x8e
+io.ReadFull(...)
+	/usr/local/go/src/io/io.go:354
+encoding/gob.decodeUintReader({0x92f9e0, 0xc00012c1e0}, {0xc000112180, 0x9, 0x9})
+	/usr/local/go/src/encoding/gob/decode.go:116 +0x51
+encoding/gob.(*Decoder).recvMessage(0xc000120990)
+	/usr/local/go/src/encoding/gob/decoder.go:84 +0x33
+encoding/gob.(*Decoder).decodeTypeSequence(0xc000120990, 0x0)
+	/usr/local/go/src/encoding/gob/decoder.go:150 +0x47
+encoding/gob.(*Decoder).DecodeValue(0xc000120990, {0x7ea620?, 0xc000122040?, 0x49c709?})
+	/usr/local/go/src/encoding/gob/decoder.go:229 +0x16e
+encoding/gob.(*Decoder).Decode(0xc000120990?, {0x7ea620?, 0xc000122040?})
+	/usr/local/go/src/encoding/gob/decoder.go:206 +0xdc
+net/rpc.(*gobServerCodec).ReadRequestHeader(0xc25860?, 0xc0003237c0?)
+	/usr/local/go/src/net/rpc/server.go:403 +0x25
+net/rpc.(*Server).readRequestHeader(0xc25860, {0x932d58, 0xc00011c840})
+	/usr/local/go/src/net/rpc/server.go:589 +0x58
+net/rpc.(*Server).readRequest(0xc000072950?, {0x932d58, 0xc00011c840})
+	/usr/local/go/src/net/rpc/server.go:549 +0x2f
+net/rpc.(*Server).ServeCodec(0xc25860, {0x932d58, 0xc00011c840})
+	/usr/local/go/src/net/rpc/server.go:464 +0x71
+net/rpc.(*Server).ServeConn(0xc25860, {0x777761262098, 0xc00011e120})
+	/usr/local/go/src/net/rpc/server.go:455 +0x34f
+net/rpc.(*Server).ServeHTTP(0xc25860, {0x932868?, 0xc0001340f0}, 0xc000130140)
+	/usr/local/go/src/net/rpc/server.go:710 +0x3cd
+net/http.(*ServeMux).ServeHTTP(0x479719?, {0x932868, 0xc0001340f0}, 0xc000130140)
+	/usr/local/go/src/net/http/server.go:2861 +0x1c7
+net/http.serverHandler.ServeHTTP({0xc0001267c0?}, {0x932868?, 0xc0001340f0?}, 0x1?)
+	/usr/local/go/src/net/http/server.go:3340 +0x8e
+net/http.(*conn).serve(0xc000120870, {0x932e18, 0xc0000e7e60})
+	/usr/local/go/src/net/http/server.go:2109 +0x665
+created by net/http.(*Server).Serve in goroutine 1
+	/usr/local/go/src/net/http/server.go:3493 +0x485
+
+goroutine 141 [IO wait]:
+internal/poll.runtime_pollWait(0x777761ab8600, 0x72)
+	/usr/local/go/src/runtime/netpoll.go:351 +0x85
+internal/poll.(*pollDesc).wait(0xc00002cc80?, 0xc0003db000?, 0x0)
+	/usr/local/go/src/internal/poll/fd_poll_runtime.go:84 +0x27
+internal/poll.(*pollDesc).waitRead(...)
+	/usr/local/go/src/internal/poll/fd_poll_runtime.go:89
+internal/poll.(*FD).Read(0xc00002cc80, {0xc0003db000, 0x1000, 0x1000})
+	/usr/local/go/src/internal/poll/fd_unix.go:165 +0x279
+net.(*netFD).Read(0xc00002cc80, {0xc0003db000?, 0x6?, 0x198?})
+	/usr/local/go/src/net/fd_posix.go:68 +0x25
+net.(*conn).Read(0xc0000663d0, {0xc0003db000?, 0x93d6e0?, 0x1?})
+	/usr/local/go/src/net/net.go:196 +0x45
+bufio.(*Reader).Read(0xc0003c41e0, {0xc0003942c0, 0x1, 0xc0004b0100?})
+	/usr/local/go/src/bufio/bufio.go:245 +0x197
+io.ReadAtLeast({0x92f9e0, 0xc0003c41e0}, {0xc0003942c0, 0x1, 0x9}, 0x1)
+	/usr/local/go/src/io/io.go:335 +0x8e
+io.ReadFull(...)
+	/usr/local/go/src/io/io.go:354
+encoding/gob.decodeUintReader({0x92f9e0, 0xc0003c41e0}, {0xc0003942c0, 0x9, 0x9})
+	/usr/local/go/src/encoding/gob/decode.go:116 +0x51
+encoding/gob.(*Decoder).recvMessage(0xc0003b4990)
+	/usr/local/go/src/encoding/gob/decoder.go:84 +0x33
+encoding/gob.(*Decoder).decodeTypeSequence(0xc0003b4990, 0x0)
+	/usr/local/go/src/encoding/gob/decoder.go:150 +0x47
+encoding/gob.(*Decoder).DecodeValue(0xc0003b4990, {0x7ea620?, 0xc000122280?, 0x41?})
+	/usr/local/go/src/encoding/gob/decoder.go:229 +0x16e
+encoding/gob.(*Decoder).Decode(0xc0003b4990?, {0x7ea620?, 0xc000122280?})
+	/usr/local/go/src/encoding/gob/decoder.go:206 +0xdc
+net/rpc.(*gobServerCodec).ReadRequestHeader(0xc25860?, 0x7777a8f4a210?)
+	/usr/local/go/src/net/rpc/server.go:403 +0x25
+net/rpc.(*Server).readRequestHeader(0xc25860, {0x932d58, 0xc0003ae810})
+	/usr/local/go/src/net/rpc/server.go:589 +0x58
+net/rpc.(*Server).readRequest(0xc000216950?, {0x932d58, 0xc0003ae810})
+	/usr/local/go/src/net/rpc/server.go:549 +0x2f
+net/rpc.(*Server).ServeCodec(0xc25860, {0x932d58, 0xc0003ae810})
+	/usr/local/go/src/net/rpc/server.go:464 +0x71
+net/rpc.(*Server).ServeConn(0xc25860, {0x777761262098, 0xc0000663d0})
+	/usr/local/go/src/net/rpc/server.go:455 +0x34f
+net/rpc.(*Server).ServeHTTP(0xc25860, {0x932868?, 0xc0003cc0f0}, 0xc0003c8140)
+	/usr/local/go/src/net/rpc/server.go:710 +0x3cd
+net/http.(*ServeMux).ServeHTTP(0x479719?, {0x932868, 0xc0003cc0f0}, 0xc0003c8140)
+	/usr/local/go/src/net/http/server.go:2861 +0x1c7
+net/http.serverHandler.ServeHTTP({0xc000396840?}, {0x932868?, 0xc0003cc0f0?}, 0x1?)
+	/usr/local/go/src/net/http/server.go:3340 +0x8e
+net/http.(*conn).serve(0xc0000db050, {0x932e18, 0xc0000e7e60})
+	/usr/local/go/src/net/http/server.go:2109 +0x665
+created by net/http.(*Server).Serve in goroutine 1
+	/usr/local/go/src/net/http/server.go:3493 +0x485
+
+goroutine 14 [runnable]:
+syscall.Syscall(0x0, 0xc, 0xc0001a9000, 0x1000)
+	/usr/local/go/src/syscall/syscall_linux.go:74 +0x25
+syscall.read(0xc00002c680?, {0xc0001a9000?, 0xc0002d3400?, 0x47a479?})
+	/usr/local/go/src/syscall/zsyscall_linux_amd64.go:736 +0x38
+syscall.Read(...)
+	/usr/local/go/src/syscall/syscall_unix.go:183
+internal/poll.ignoringEINTRIO(...)
+	/usr/local/go/src/internal/poll/fd_unix.go:738
+internal/poll.(*FD).Read(0xc00002c680, {0xc0001a9000, 0x1000, 0x1000})
+	/usr/local/go/src/internal/poll/fd_unix.go:161 +0x2ae
+net.(*netFD).Read(0xc00002c680, {0xc0001a9000?, 0x5?, 0x198?})
+	/usr/local/go/src/net/fd_posix.go:68 +0x25
+net.(*conn).Read(0xc0000663a8, {0xc0001a9000?, 0xc0002d3550?, 0x41374d?})
+	/usr/local/go/src/net/net.go:196 +0x45
+bufio.(*Reader).Read(0xc000092c60, {0xc000012405, 0x1, 0xc0002943a0?})
+	/usr/local/go/src/bufio/bufio.go:245 +0x197
+io.ReadAtLeast({0x92f9e0, 0xc000092c60}, {0xc000012405, 0x1, 0x9}, 0x1)
+	/usr/local/go/src/io/io.go:335 +0x8e
+io.ReadFull(...)
+	/usr/local/go/src/io/io.go:354
+encoding/gob.decodeUintReader({0x92f9e0, 0xc000092c60}, {0xc000012405, 0x9, 0x9})
+	/usr/local/go/src/encoding/gob/decode.go:116 +0x51
+encoding/gob.(*Decoder).recvMessage(0xc0000dad80)
+	/usr/local/go/src/encoding/gob/decoder.go:84 +0x33
+encoding/gob.(*Decoder).decodeTypeSequence(0xc0000dad80, 0x0)
+	/usr/local/go/src/encoding/gob/decoder.go:150 +0x47
+encoding/gob.(*Decoder).DecodeValue(0xc0000dad80, {0x7ea620?, 0xc000318220?, 0x84b340?})
+	/usr/local/go/src/encoding/gob/decoder.go:229 +0x16e
+encoding/gob.(*Decoder).Decode(0xc0000dad80?, {0x7ea620?, 0xc000318220?})
+	/usr/local/go/src/encoding/gob/decoder.go:206 +0xdc
+net/rpc.(*gobServerCodec).ReadRequestHeader(0xc25860?, 0x7777a8f498a0?)
+	/usr/local/go/src/net/rpc/server.go:403 +0x25
+net/rpc.(*Server).readRequestHeader(0xc25860, {0x932d58, 0xc000194690})
+	/usr/local/go/src/net/rpc/server.go:589 +0x58
+net/rpc.(*Server).readRequest(0xc000079950?, {0x932d58, 0xc000194690})
+	/usr/local/go/src/net/rpc/server.go:549 +0x2f
+net/rpc.(*Server).ServeCodec(0xc25860, {0x932d58, 0xc000194690})
+	/usr/local/go/src/net/rpc/server.go:464 +0x71
+net/rpc.(*Server).ServeConn(0xc25860, {0x777761262098, 0xc0000663a8})
+	/usr/local/go/src/net/rpc/server.go:455 +0x34f
+net/rpc.(*Server).ServeHTTP(0xc25860, {0x932868?, 0xc0000fe3c0}, 0xc0000ee500)
+	/usr/local/go/src/net/rpc/server.go:710 +0x3cd
+net/http.(*ServeMux).ServeHTTP(0x479719?, {0x932868, 0xc0000fe3c0}, 0xc0000ee500)
+	/usr/local/go/src/net/http/server.go:2861 +0x1c7
+net/http.serverHandler.ServeHTTP({0xc000091880?}, {0x932868?, 0xc0000fe3c0?}, 0x1?)
+	/usr/local/go/src/net/http/server.go:3340 +0x8e
+net/http.(*conn).serve(0xc0000dac60, {0x932e18, 0xc0000e7e60})
+	/usr/local/go/src/net/http/server.go:2109 +0x665
+created by net/http.(*Server).Serve in goroutine 1
+	/usr/local/go/src/net/http/server.go:3493 +0x485
+
+goroutine 226 [runnable]:
+encoding/gob.(*Decoder).compileDec(0xc0000db290, 0x12, 0xc000090100)
+	/usr/local/go/src/encoding/gob/decode.go:1130 +0xb45
+encoding/gob.(*Decoder).getDecEnginePtr(0xc0000db290, 0x12, 0xc000090100)
+	/usr/local/go/src/encoding/gob/decode.go:1192 +0x147
+encoding/gob.(*Decoder).decOpFor(0xc0000db290, 0x12, {0x938ad8, 0x842080}, {0x7cf8ad, 0xa}, 0xc0001b4bf8)
+	/usr/local/go/src/encoding/gob/decode.go:891 +0x4dc
+encoding/gob.(*Decoder).compileDec(0xc0000db290, 0x11, 0xc0000903c0)
+	/usr/local/go/src/encoding/gob/decode.go:1173 +0x6d2
+encoding/gob.(*Decoder).getDecEnginePtr(0xc0000db290, 0x11, 0xc0000903c0)
+	/usr/local/go/src/encoding/gob/decode.go:1192 +0x147
+encoding/gob.(*Decoder).decOpFor(0xc0000db290, 0x11, {0x938ad8, 0x84e7c0}, {0x7cb532, 0x6}, 0xc0001b5398)
+	/usr/local/go/src/encoding/gob/decode.go:891 +0x4dc
+encoding/gob.(*Decoder).compileDec(0xc0000db290, 0x10, 0xc000126200)
+	/usr/local/go/src/encoding/gob/decode.go:1173 +0x6d2
+encoding/gob.(*Decoder).getDecEnginePtr(0xc0000db290, 0x10, 0xc000126200)
+	/usr/local/go/src/encoding/gob/decode.go:1192 +0x147
+encoding/gob.(*Decoder).decodeValue(0xc0000db290, 0x10, {0x816560?, 0xc000224400?, 0x9?})
+	/usr/local/go/src/encoding/gob/decode.go:1237 +0xf7
+encoding/gob.(*Decoder).recvType(0xc0000db290, 0x40)
+	/usr/local/go/src/encoding/gob/decoder.go:70 +0xda
+encoding/gob.(*Decoder).decodeTypeSequence(0xc0000db290, 0x0)
+	/usr/local/go/src/encoding/gob/decoder.go:168 +0x76
+encoding/gob.(*Decoder).DecodeValue(0xc0000db290, {0x7ea620?, 0xc0003181c0?, 0x30?})
+	/usr/local/go/src/encoding/gob/decoder.go:229 +0x16e
+encoding/gob.(*Decoder).Decode(0x7?, {0x7ea620?, 0xc0003181c0?})
+	/usr/local/go/src/encoding/gob/decoder.go:206 +0xdc
+net/rpc.(*gobServerCodec).ReadRequestHeader(0xc25860?, 0x655b2f?)
+	/usr/local/go/src/net/rpc/server.go:403 +0x25
+net/rpc.(*Server).readRequestHeader(0xc25860, {0x932d58, 0xc000194c00})
+	/usr/local/go/src/net/rpc/server.go:589 +0x58
+net/rpc.(*Server).readRequest(0xc000412950?, {0x932d58, 0xc000194c00})
+	/usr/local/go/src/net/rpc/server.go:549 +0x2f
+net/rpc.(*Server).ServeCodec(0xc25860, {0x932d58, 0xc000194c00})
+	/usr/local/go/src/net/rpc/server.go:464 +0x71
+net/rpc.(*Server).ServeConn(0xc25860, {0x777761262098, 0xc0000663e0})
+	/usr/local/go/src/net/rpc/server.go:455 +0x34f
+net/rpc.(*Server).ServeHTTP(0xc25860, {0x932868?, 0xc0000fe5a0}, 0xc0000ee780)
+	/usr/local/go/src/net/rpc/server.go:710 +0x3cd
+net/http.(*ServeMux).ServeHTTP(0x479719?, {0x932868, 0xc0000fe5a0}, 0xc0000ee780)
+	/usr/local/go/src/net/http/server.go:2861 +0x1c7
+net/http.serverHandler.ServeHTTP({0xc000091bc0?}, {0x932868?, 0xc0000fe5a0?}, 0x1?)
+	/usr/local/go/src/net/http/server.go:3340 +0x8e
+net/http.(*conn).serve(0xc0000db170, {0x932e18, 0xc0000e7e60})
+	/usr/local/go/src/net/http/server.go:2109 +0x665
+created by net/http.(*Server).Serve in goroutine 1
+	/usr/local/go/src/net/http/server.go:3493 +0x485
+
+goroutine 132 [runnable]:
+internal/poll.runtime_pollWait(0x777761ab8800, 0x72)
+	/usr/local/go/src/runtime/netpoll.go:351 +0x85
+internal/poll.(*pollDesc).wait(0xc00002c880?, 0xc0001ad000?, 0x0)
+	/usr/local/go/src/internal/poll/fd_poll_runtime.go:84 +0x27
+internal/poll.(*pollDesc).waitRead(...)
+	/usr/local/go/src/internal/poll/fd_poll_runtime.go:89
+internal/poll.(*FD).Read(0xc00002c880, {0xc0001ad000, 0x1000, 0x1000})
+	/usr/local/go/src/internal/poll/fd_unix.go:165 +0x279
+net.(*netFD).Read(0xc00002c880, {0xc0001ad000?, 0x1?, 0x198?})
+	/usr/local/go/src/net/fd_posix.go:68 +0x25
+net.(*conn).Read(0xc0000663b0, {0xc0001ad000?, 0xc000437550?, 0x41374d?})
+	/usr/local/go/src/net/net.go:196 +0x45
+bufio.(*Reader).Read(0xc000092d80, {0xc0000124a5, 0x1, 0xc00041c120?})
+	/usr/local/go/src/bufio/bufio.go:245 +0x197
+io.ReadAtLeast({0x92f9e0, 0xc000092d80}, {0xc0000124a5, 0x1, 0x9}, 0x1)
+	/usr/local/go/src/io/io.go:335 +0x8e
+io.ReadFull(...)
+	/usr/local/go/src/io/io.go:354
+encoding/gob.decodeUintReader({0x92f9e0, 0xc000092d80}, {0xc0000124a5, 0x9, 0x9})
+	/usr/local/go/src/encoding/gob/decode.go:116 +0x51
+encoding/gob.(*Decoder).recvMessage(0xc0000daf30)
+	/usr/local/go/src/encoding/gob/decoder.go:84 +0x33
+encoding/gob.(*Decoder).decodeTypeSequence(0xc0000daf30, 0x0)
+	/usr/local/go/src/encoding/gob/decoder.go:150 +0x47
+encoding/gob.(*Decoder).DecodeValue(0xc0000daf30, {0x7ea620?, 0xc0002944a0?, 0x84b340?})
+	/usr/local/go/src/encoding/gob/decoder.go:229 +0x16e
+encoding/gob.(*Decoder).Decode(0xc0000daf30?, {0x7ea620?, 0xc0002944a0?})
+	/usr/local/go/src/encoding/gob/decoder.go:206 +0xdc
+net/rpc.(*gobServerCodec).ReadRequestHeader(0xc25860?, 0x7777a8f493e8?)
+	/usr/local/go/src/net/rpc/server.go:403 +0x25
+net/rpc.(*Server).readRequestHeader(0xc25860, {0x932d58, 0xc0001948a0})
+	/usr/local/go/src/net/rpc/server.go:589 +0x58
+net/rpc.(*Server).readRequest(0xc000412950?, {0x932d58, 0xc0001948a0})
+	/usr/local/go/src/net/rpc/server.go:549 +0x2f
+net/rpc.(*Server).ServeCodec(0xc25860, {0x932d58, 0xc0001948a0})
+	/usr/local/go/src/net/rpc/server.go:464 +0x71
+net/rpc.(*Server).ServeConn(0xc25860, {0x777761262098, 0xc0000663b0})
+	/usr/local/go/src/net/rpc/server.go:455 +0x34f
+net/rpc.(*Server).ServeHTTP(0xc25860, {0x932868?, 0xc0000fe4b0}, 0xc0000ee640)
+	/usr/local/go/src/net/rpc/server.go:710 +0x3cd
+net/http.(*ServeMux).ServeHTTP(0x479719?, {0x932868, 0xc0000fe4b0}, 0xc0000ee640)
+	/usr/local/go/src/net/http/server.go:2861 +0x1c7
+net/http.serverHandler.ServeHTTP({0xc0000919c0?}, {0x932868?, 0xc0000fe4b0?}, 0x1?)
+	/usr/local/go/src/net/http/server.go:3340 +0x8e
+net/http.(*conn).serve(0xc0000dae10, {0x932e18, 0xc0000e7e60})
+	/usr/local/go/src/net/http/server.go:2109 +0x665
+created by net/http.(*Server).Serve in goroutine 1
+	/usr/local/go/src/net/http/server.go:3493 +0x485
+
+goroutine 142 [IO wait]:
+internal/poll.runtime_pollWait(0x777761ab8400, 0x72)
+	/usr/local/go/src/runtime/netpoll.go:351 +0x85
+internal/poll.(*pollDesc).wait(0xc00002cd00?, 0xc000355000?, 0x0)
+	/usr/local/go/src/internal/poll/fd_poll_runtime.go:84 +0x27
+internal/poll.(*pollDesc).waitRead(...)
+	/usr/local/go/src/internal/poll/fd_poll_runtime.go:89
+internal/poll.(*FD).Read(0xc00002cd00, {0xc000355000, 0x1000, 0x1000})
+	/usr/local/go/src/internal/poll/fd_unix.go:165 +0x279
+net.(*netFD).Read(0xc00002cd00, {0xc000355000?, 0x4273b6?, 0xc47ba0?})
+	/usr/local/go/src/net/fd_posix.go:68 +0x25
+net.(*conn).Read(0xc0000663d8, {0xc000355000?, 0x77776015e628?, 0x7777a8f4a6c8?})
+	/usr/local/go/src/net/net.go:196 +0x45
+bufio.(*Reader).Read(0xc00030c180, {0xc0003101e5, 0x1, 0x877920?})
+	/usr/local/go/src/bufio/bufio.go:245 +0x197
+io.ReadAtLeast({0x92f9e0, 0xc00030c180}, {0xc0003101e5, 0x1, 0x9}, 0x1)
+	/usr/local/go/src/io/io.go:335 +0x8e
+io.ReadFull(...)
+	/usr/local/go/src/io/io.go:354
+encoding/gob.decodeUintReader({0x92f9e0, 0xc00030c180}, {0xc0003101e5, 0x9, 0x9})
+	/usr/local/go/src/encoding/gob/decode.go:116 +0x51
+encoding/gob.(*Decoder).recvMessage(0xc00030a7e0)
+	/usr/local/go/src/encoding/gob/decoder.go:84 +0x33
+encoding/gob.(*Decoder).decodeTypeSequence(0xc00030a7e0, 0x0)
+	/usr/local/go/src/encoding/gob/decoder.go:150 +0x47
+encoding/gob.(*Decoder).DecodeValue(0xc00030a7e0, {0x7ea620?, 0xc00007aa00?, 0x148bc59c1458?})
+	/usr/local/go/src/encoding/gob/decoder.go:229 +0x16e
+encoding/gob.(*Decoder).Decode(0xc00030a7e0?, {0x7ea620?, 0xc00007aa00?})
+	/usr/local/go/src/encoding/gob/decoder.go:206 +0xdc
+net/rpc.(*gobServerCodec).ReadRequestHeader(0xc25860?, 0x7777a8f4a6c8?)
+	/usr/local/go/src/net/rpc/server.go:403 +0x25
+net/rpc.(*Server).readRequestHeader(0xc25860, {0x932d58, 0xc00030e600})
+	/usr/local/go/src/net/rpc/server.go:589 +0x58
+net/rpc.(*Server).readRequest(0xc000348950?, {0x932d58, 0xc00030e600})
+	/usr/local/go/src/net/rpc/server.go:549 +0x2f
+net/rpc.(*Server).ServeCodec(0xc25860, {0x932d58, 0xc00030e600})
+	/usr/local/go/src/net/rpc/server.go:464 +0x71
+net/rpc.(*Server).ServeConn(0xc25860, {0x777761262098, 0xc0000663d8})
+	/usr/local/go/src/net/rpc/server.go:455 +0x34f
+net/rpc.(*Server).ServeHTTP(0xc25860, {0x932868?, 0xc000352000}, 0xc00034e000)
+	/usr/local/go/src/net/rpc/server.go:710 +0x3cd
+net/http.(*ServeMux).ServeHTTP(0x479719?, {0x932868, 0xc000352000}, 0xc00034e000)
+	/usr/local/go/src/net/http/server.go:2861 +0x1c7
+net/http.serverHandler.ServeHTTP({0xc0003082c0?}, {0x932868?, 0xc000352000?}, 0x1?)
+	/usr/local/go/src/net/http/server.go:3340 +0x8e
+net/http.(*conn).serve(0xc0000db0e0, {0x932e18, 0xc0000e7e60})
+	/usr/local/go/src/net/http/server.go:2109 +0x665
+created by net/http.(*Server).Serve in goroutine 1
+	/usr/local/go/src/net/http/server.go:3493 +0x485
+
+goroutine 213 [runnable]:
+syscall.Syscall(0x0, 0x11, 0xc0002ed000, 0x1000)
+	/usr/local/go/src/syscall/syscall_linux.go:74 +0x25
+syscall.read(0xc0002b6980?, {0xc0002ed000?, 0xc000078500?, 0xc000078478?})
+	/usr/local/go/src/syscall/zsyscall_linux_amd64.go:736 +0x38
+syscall.Read(...)
+	/usr/local/go/src/syscall/syscall_unix.go:183
+internal/poll.ignoringEINTRIO(...)
+	/usr/local/go/src/internal/poll/fd_unix.go:738
+internal/poll.(*FD).Read(0xc0002b6980, {0xc0002ed000, 0x1000, 0x1000})
+	/usr/local/go/src/internal/poll/fd_unix.go:161 +0x2ae
+net.(*netFD).Read(0xc0002b6980, {0xc0002ed000?, 0xc000078508?, 0x47cb1f?})
+	/usr/local/go/src/net/fd_posix.go:68 +0x25
+net.(*conn).Read(0xc0002a0310, {0xc0002ed000?, 0x8421c0?, 0xc0002b2258?})
+	/usr/local/go/src/net/net.go:196 +0x45
+bufio.(*Reader).Read(0xc00028c540, {0xc000290320, 0x1, 0xc0000785a8?})
+	/usr/local/go/src/bufio/bufio.go:245 +0x197
+io.ReadAtLeast({0x92f9e0, 0xc00028c540}, {0xc000290320, 0x1, 0x9}, 0x1)
+	/usr/local/go/src/io/io.go:335 +0x8e
+io.ReadFull(...)
+	/usr/local/go/src/io/io.go:354
+encoding/gob.decodeUintReader({0x92f9e0, 0xc00028c540}, {0xc000290320, 0x9, 0x9})
+	/usr/local/go/src/encoding/gob/decode.go:116 +0x51
+encoding/gob.(*Decoder).recvMessage(0xc00028ae10)
+	/usr/local/go/src/encoding/gob/decoder.go:84 +0x33
+encoding/gob.(*Decoder).decodeTypeSequence(0xc00028ae10, 0x0)
+	/usr/local/go/src/encoding/gob/decoder.go:150 +0x47
+encoding/gob.(*Decoder).DecodeValue(0xc00028ae10, {0x7ea620?, 0xc000294000?, 0x421b25?})
+	/usr/local/go/src/encoding/gob/decoder.go:229 +0x16e
+encoding/gob.(*Decoder).Decode(0x7?, {0x7ea620?, 0xc000294000?})
+	/usr/local/go/src/encoding/gob/decoder.go:206 +0xdc
+net/rpc.(*gobServerCodec).ReadRequestHeader(0xc25860?, 0x2f?)
+	/usr/local/go/src/net/rpc/server.go:403 +0x25
+net/rpc.(*Server).readRequestHeader(0xc25860, {0x932d58, 0xc00028ecc0})
+	/usr/local/go/src/net/rpc/server.go:589 +0x58
+net/rpc.(*Server).readRequest(0xc000078950?, {0x932d58, 0xc00028ecc0})
+	/usr/local/go/src/net/rpc/server.go:549 +0x2f
+net/rpc.(*Server).ServeCodec(0xc25860, {0x932d58, 0xc00028ecc0})
+	/usr/local/go/src/net/rpc/server.go:464 +0x71
+net/rpc.(*Server).ServeConn(0xc25860, {0x777761262098, 0xc0002a0310})
+	/usr/local/go/src/net/rpc/server.go:455 +0x34f
+net/rpc.(*Server).ServeHTTP(0xc25860, {0x932868?, 0xc0002ea000}, 0xc0002e6000)
+	/usr/local/go/src/net/rpc/server.go:710 +0x3cd
+net/http.(*ServeMux).ServeHTTP(0x479719?, {0x932868, 0xc0002ea000}, 0xc0002e6000)
+	/usr/local/go/src/net/http/server.go:2861 +0x1c7
+net/http.serverHandler.ServeHTTP({0xc000288800?}, {0x932868?, 0xc0002ea000?}, 0x1?)
+	/usr/local/go/src/net/http/server.go:3340 +0x8e
+net/http.(*conn).serve(0xc00028acf0, {0x932e18, 0xc0000e7e60})
+	/usr/local/go/src/net/http/server.go:2109 +0x665
+created by net/http.(*Server).Serve in goroutine 1
+	/usr/local/go/src/net/http/server.go:3493 +0x485
+
+goroutine 183 [runnable]:
+net/rpc.(*Server).ServeCodec.gowrap1()
+	/usr/local/go/src/net/rpc/server.go:480
+runtime.goexit({})
+	/usr/local/go/src/runtime/asm_amd64.s:1693 +0x1
+created by net/rpc.(*Server).ServeCodec in goroutine 35
+	/usr/local/go/src/net/rpc/server.go:480 +0x3de

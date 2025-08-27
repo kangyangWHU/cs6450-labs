@@ -27,7 +27,8 @@ func (s *Stats) Sub(prev *Stats) Stats {
 
 type KVService struct {
 	sync.Mutex
-	mp        map[string]string
+	// mp        map[string]string
+	mp        map[string]uint64
 	stats     Stats
 	prevStats Stats
 	lastPrint time.Time
@@ -35,7 +36,8 @@ type KVService struct {
 
 func NewKVService() *KVService {
 	kvs := &KVService{}
-	kvs.mp = make(map[string]string)
+	// kvs.mp = make(map[string]string)
+	kvs.mp = make(map[string]uint64)
 	kvs.lastPrint = time.Now()
 	return kvs
 }
@@ -53,6 +55,22 @@ func (kv *KVService) Get(request *kvs.GetRequest, response *kvs.GetResponse) err
 	return nil
 }
 
+func (kv *KVService) GetBatch(requests *kvs.GetBatchRequest, responses *kvs.GetBatchResponse) error {
+	kv.Lock()
+	defer kv.Unlock()
+
+	kv.stats.gets += uint64(len(requests.Keys))
+	responses.Values = make([]kvs.GetResponse, len(requests.Keys))
+
+	for i, request := range requests.Keys {
+		if value, found := kv.mp[request.Key]; found {
+			responses.Values[i].Value = value
+		}
+	}
+
+	return nil
+}
+
 func (kv *KVService) Put(request *kvs.PutRequest, response *kvs.PutResponse) error {
 	kv.Lock()
 	defer kv.Unlock()
@@ -60,6 +78,19 @@ func (kv *KVService) Put(request *kvs.PutRequest, response *kvs.PutResponse) err
 	kv.stats.puts++
 
 	kv.mp[request.Key] = request.Value
+
+	return nil
+}
+
+func (kv *KVService) PutBatch(requests *kvs.PutBatchRequest, responses *kvs.PutBatchResponse) error {
+	kv.Lock()
+	defer kv.Unlock()
+
+	kv.stats.puts += uint64(len(requests.Items))
+
+	for _, item := range requests.Items {
+		kv.mp[item.Key] = item.Value
+	}
 
 	return nil
 }

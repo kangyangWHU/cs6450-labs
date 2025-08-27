@@ -1,0 +1,5 @@
+hosts [node0:8080]
+theta 0.99
+workload YCSB-B
+secs 30
+2025/08/27 14:58:26 unexpected EOF

@@ -1,0 +1,5 @@
+hosts [node0:8080]
+theta 0.99
+workload YCSB-B
+secs 30
+2025/08/26 16:50:37 dial-http tcp node0:8080: read tcp 10.10.1.3:55296->10.10.1.1:8080: read: connection reset by peer
