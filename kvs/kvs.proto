@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package kvs;
+
+option go_package = "github.com/rstutsman/cs6450-labs/kvs";
+
+// Protobuf-optimized batch operations (avoiding name conflicts with existing types)
+// These are designed for high-performance serialization
+
+message ProtoGetBatchRequest {
+    repeated string keys = 1;  // Direct string array, more efficient than repeated structs
+}
+
+message ProtoGetBatchResponse {
+    repeated string values = 1;  // Direct string array, more efficient than repeated structs
+}
+
+message ProtoPutBatchRequest {
+    message Item {
+        string key = 1;
+        string value = 2;
+    }
+    repeated Item items = 1;
+}
+
+message ProtoPutBatchResponse {
+    // Empty response
+}
