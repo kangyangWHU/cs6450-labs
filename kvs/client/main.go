@@ -7,10 +7,12 @@ import (
 	"net/rpc"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/rstutsman/cs6450-labs/kvs"
+	// "github.com/rstutsman/cs6450-labs/kvs"
 )
 
 type Client struct {
@@ -26,6 +28,20 @@ func Dial(addr string) *Client {
 	}
 
 	return &Client{rpcClient}
+}
+
+// fnv64a is a small, fast non-crypto hash for partitioning.
+func fnv64a(s string) uint64 {
+	const (
+		offset64 = 1469598103934665603
+		prime64  = 1099511628211
+	)
+	var h uint64 = offset64
+	for i := 0; i < len(s); i++ {
+		h ^= uint64(s[i])
+		h *= prime64
+	}
+	return h
 }
 
 // Get retrieves the value associated with the specified key from the key-value store.
@@ -63,19 +79,165 @@ func (client *Client) Put(key string, value string) {
 	}
 }
 
+// runClientPartitioned sends ops to P independent partitions.
+// Each partition keeps its own GET/PUT buffers and flushes them via batch RPCs.
+func runClientPartitioned(
+	id int,
+	addr string,
+	done *atomic.Bool,
+	workload *kvs.Workload,
+	resultsCh chan<- uint64,
+) {
+	const partitions = 4
+	const batchSize = 1024
+
+	// One RPC connection per partition (to avoid HOL on a single conn).
+	clients := make([]*Client, partitions)
+	for i := range clients {
+		clients[i] = Dial(addr)
+	}
+
+	type Op struct {
+		key    string
+		isRead bool
+		value  string
+	}
+
+	// One channel per partition; no shared mutation -> no locks.
+	partCh := make([]chan Op, partitions)
+	for i := 0; i < partitions; i++ {
+		partCh[i] = make(chan Op, 4096) // 4096 Ops buffer for each channel.
+	}
+
+	var totalOps uint64
+	var wg sync.WaitGroup
+
+	// One flusher goroutine per partition that owns its buffers.
+	for p := 0; p < partitions; p++ {
+		wg.Add(1)
+		go func(p int, in <-chan Op, client *Client) {
+			defer wg.Done()
+
+			gets := make([]kvs.GetRequest, 0, batchSize)
+			puts := make([]kvs.PutRequest, 0, batchSize)
+
+			flush := func() { // RH: a flush closure that flushes gets and puts buffer
+				if len(gets) > 0 {
+					req := kvs.GetBatchRequest{Keys: gets}
+					var resp kvs.GetBatchResponse
+					if err := client.rpcClient.Call("KVService.GetBatch", &req, &resp); err != nil {
+						log.Fatal(err)
+					}
+					atomic.AddUint64(&totalOps, uint64(len(gets)))
+					gets = gets[:0]
+				}
+				if len(puts) > 0 {
+					req := kvs.PutBatchRequest{Items: puts}
+					var resp kvs.PutBatchResponse
+					if err := client.rpcClient.Call("KVService.PutBatch", &req, &resp); err != nil {
+						log.Fatal(err)
+					}
+					atomic.AddUint64(&totalOps, uint64(len(puts)))
+					puts = puts[:0]
+				}
+			}
+
+			// Time-based micro-batching to cap tail latency.
+			// ticker := time.NewTicker(1 * time.Millisecond)
+			// defer ticker.Stop()
+
+			for {
+				// select {
+				// case o, ok := <-in:
+				o, ok := <-in
+				if !ok {
+					// Drain & exit.
+					if len(gets) > 0 || len(puts) > 0 {
+						flush()
+					}
+					return
+				}
+				if o.isRead {
+					gets = append(gets, kvs.GetRequest{Key: o.key})
+					if len(gets) >= batchSize {
+						flush()
+					}
+				} else {
+					// Preserve your original rule: flush pending GETs before switching to PUTs.
+					// (Matches your current single-buffer logic.) :contentReference[oaicite:6]{index=6}
+					if len(gets) > 0 {
+						flush()
+					}
+					puts = append(puts, kvs.PutRequest{Key: o.key, Value: o.value})
+					if len(puts) >= batchSize {
+						flush()
+					}
+				}
+				// case <-ticker.C:
+				// if len(gets) > 0 || len(puts) > 0 {
+				// flush()
+				// }
+				// }
+			}
+		}(p, partCh[p], clients[p])
+	}
+
+	// Producer: generate ops and route to a partition by hash(key) % P.
+	value := strings.Repeat("x", 128)
+	for !done.Load() {
+		// Super-batch just to amortize Next(); individual partitions still micro-batch/flush.
+		for j := 0; j < batchSize; j++ {
+			op := workload.Next() // existing generator :contentReference[oaicite:7]{index=7}
+			key := strconv.FormatInt(int64(op.Key), 10)
+			p := int(fnv64a(key) % uint64(partitions))
+			if op.IsRead {
+				partCh[p] <- Op{key: key, isRead: true}
+			} else {
+				partCh[p] <- Op{key: key, isRead: false, value: value}
+			}
+		}
+	}
+
+	// Signal workers to stop and flush.
+	for i := range partCh {
+		close(partCh[i])
+	}
+	wg.Wait()
+
+	fmt.Printf("Client %d finished operations.\n", id)
+	resultsCh <- atomic.LoadUint64(&totalOps)
+}
+
+// func runClient3(id int, addr string, done *atomic.Bool,
+// 		workload *kvs.Workload, resultsCh chan<- uint64) {
+// 	client := Dial(addr)
+// 	value := strings.Repeat("x", 128)
+// 	const batchSize = 1024
+// 	opsCompleted := uint64(0)
+// 	const bucketSize = 3
+// 	// each bucket has 2 buffer, one for get and one for put.
+// 	clientBuckets := make([]kvs.ClientBucket, 0, bucketSize)
+// 	for i := 0; i < bucketSize; i++ {
+// 		clientBuckets = append(clientBuckets, kvs.ClientBucket{
+// 			GetBuffer: kvs.GetBatchRequest{},
+// 			PutBuffer: kvs.PutBatchRequest{},
+// 		})
+// 	}
+
+// 	// each bucket is supposed to be
+// }
+
 func runClient2(id int, addr string, done *atomic.Bool, workload *kvs.Workload, resultsCh chan<- uint64) {
 	client := Dial(addr)
 
 	value := strings.Repeat("x", 128)
-	const batchSize = 1024
-
+	const getBufferSize = 512 // 512 seems to be faster than 1024, 2048
+	const putBufferSize = 512
+	const batchSize = 512
 	opsCompleted := uint64(0)
-
-	// Buffers for batching requests
-	getBuffer := make([]kvs.GetRequest, 0, batchSize)
-	putBuffer := make([]kvs.PutRequest, 0, batchSize)
-
-	// Helper function to flush get buffer
+	getBuffer := make([]kvs.GetRequest, 0, getBufferSize)
+	putBuffer := make([]kvs.PutRequest, 0, putBufferSize)
+	// RH: closure to flush out getBuffer.
 	flushGetBuffer := func() {
 		if len(getBuffer) > 0 {
 			request := kvs.GetBatchRequest{Keys: getBuffer}
@@ -85,11 +247,10 @@ func runClient2(id int, addr string, done *atomic.Bool, workload *kvs.Workload, 
 				log.Fatal(err)
 			}
 			opsCompleted += uint64(len(getBuffer))
-			getBuffer = getBuffer[:0] // Reset buffer
+			getBuffer = getBuffer[:0] // reset
 		}
 	}
 
-	// Helper function to flush put buffer
 	flushPutBuffer := func() {
 		if len(putBuffer) > 0 {
 			request := kvs.PutBatchRequest{Items: putBuffer}
@@ -109,36 +270,30 @@ func runClient2(id int, addr string, done *atomic.Bool, workload *kvs.Workload, 
 			key := strconv.FormatInt(int64(op.Key), 10)
 
 			if op.IsRead {
-				// If we have puts pending, flush them first to maintain order
-				if len(putBuffer) > 0 {
+				if len(putBuffer) > 0 { // if we already have puts pending, then flush it
 					flushPutBuffer()
 				}
 				getBuffer = append(getBuffer, kvs.GetRequest{Key: key})
 
-				// If get buffer is full, flush it
 				if len(getBuffer) >= batchSize {
 					flushGetBuffer()
 				}
 			} else {
-				// If we have gets pending, flush them first to maintain order
 				if len(getBuffer) > 0 {
 					flushGetBuffer()
 				}
 				putBuffer = append(putBuffer, kvs.PutRequest{Key: key, Value: value})
 
-				// If put buffer is full, flush it
 				if len(putBuffer) >= batchSize {
 					flushPutBuffer()
 				}
 			}
 		}
 
-		// Flush any remaining requests at the end of each batch
 		flushGetBuffer()
 		flushPutBuffer()
 	}
 
-	// Final flush to ensure all requests are sent
 	flushGetBuffer()
 	flushPutBuffer()
 
@@ -238,7 +393,7 @@ func main() {
 	for clientId := 0; clientId < clientNum; clientId++ {
 		go func(clientId int) {
 			workload := kvs.NewWorkload(*workload, *theta)
-			runClient2(clientId, host, &done, workload, resultsChs[clientId])
+			runClientPartitioned(clientId, host, &done, workload, resultsChs[clientId])
 		}(clientId)
 	}
 

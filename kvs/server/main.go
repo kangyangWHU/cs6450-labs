@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/rpc"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/rstutsman/cs6450-labs/kvs"
@@ -25,73 +26,186 @@ func (s *Stats) Sub(prev *Stats) Stats {
 	return r
 }
 
+// fnv64a is a small, fast non-crypto hash for partitioning.
+func fnv64a(s string) uint64 {
+	const (
+		offset64 = 1469598103934665603
+		prime64  = 1099511628211
+	)
+	var h uint64 = offset64
+	for i := 0; i < len(s); i++ {
+		h ^= uint64(s[i])
+		h *= prime64
+	}
+	return h
+}
+
+// type KVService struct {
+// 	// sync.Mutex
+// 	sync.RWMutex // enables more finetuned locking
+// 	mp           map[string]string
+// 	stats        Stats
+// 	prevStats    Stats
+// 	lastPrint    time.Time
+// }
+
+type Shard struct { // split the big table into multiple shards.
+	sync.RWMutex
+	mp map[string]string
+	// stats    Stats
+	// prevStats Stats
+	// lastPrint time.Time
+}
+
+const numShards = 64
+
 type KVService struct {
-	sync.Mutex
-	// mp        map[string]string
-	mp        map[string]uint64
+	sync.RWMutex
+	// mp       map[string]string
+	// shards    [numShards]Shard
+	shards    [numShards]*Shard // a group of shards
 	stats     Stats
 	prevStats Stats
 	lastPrint time.Time
 }
 
+func (kv *KVService) shardIdx(key string) int {
+	return int(fnv64a(key) & (numShards - 1)) // power-of-two shard count
+}
+
+func NewShard() *Shard {
+	return &Shard{
+		mp: make(map[string]string),
+	}
+}
+
 func NewKVService() *KVService {
 	kvs := &KVService{}
-	// kvs.mp = make(map[string]string)
-	kvs.mp = make(map[string]uint64)
+	kvs.shards = [numShards]*Shard{}
+	for i := 0; i < numShards; i++ {
+		kvs.shards[i] = NewShard()
+	}
 	kvs.lastPrint = time.Now()
 	return kvs
 }
 
-func (kv *KVService) Get(request *kvs.GetRequest, response *kvs.GetResponse) error {
-	kv.Lock()
-	defer kv.Unlock()
+// func (kv *KVService) Get(request *kvs.GetRequest, response *kvs.GetResponse) error {
+// 	kv.Lock()
+// 	defer kv.Unlock()
 
-	kv.stats.gets++
+// 	kv.stats.gets++
 
-	if value, found := kv.mp[request.Key]; found {
-		response.Value = value
+// 	if value, found := kv.mp[request.Key]; found {
+// 		response.Value = value
+// 	}
+
+// 	return nil
+// }
+
+func (kv *KVService) GetBatch(req *kvs.GetBatchRequest, resp *kvs.GetBatchResponse) error {
+	resp.Values = make([]kvs.GetResponse, len(req.Keys))
+	// 1) bucket indices by shard (so we keep response order)
+	var buckets [numShards][]int
+	for i, g := range req.Keys {
+		s := kv.shardIdx(g.Key)
+		buckets[s] = append(buckets[s], i)
 	}
-
-	return nil
-}
-
-func (kv *KVService) GetBatch(requests *kvs.GetBatchRequest, responses *kvs.GetBatchResponse) error {
-	kv.Lock()
-	defer kv.Unlock()
-
-	kv.stats.gets += uint64(len(requests.Keys))
-	responses.Values = make([]kvs.GetResponse, len(requests.Keys))
-
-	for i, request := range requests.Keys {
-		if value, found := kv.mp[request.Key]; found {
-			responses.Values[i].Value = value
+	// 2) read each shard in parallel
+	var wg sync.WaitGroup
+	for s := 0; s < numShards; s++ {
+		if len(buckets[s]) == 0 {
+			continue
 		}
+		wg.Add(1)
+		go func(s int, idxs []int) {
+			defer wg.Done()
+			sh := kv.shards[s]
+			sh.RLock()
+			for _, i := range idxs {
+				k := req.Keys[i].Key
+				resp.Values[i] = kvs.GetResponse{Value: sh.mp[k]}
+			}
+			sh.RUnlock()
+		}(s, buckets[s])
 	}
-
+	wg.Wait()
+	atomic.AddUint64(&kv.stats.gets, uint64(len(req.Keys)))
 	return nil
 }
 
-func (kv *KVService) Put(request *kvs.PutRequest, response *kvs.PutResponse) error {
-	kv.Lock()
-	defer kv.Unlock()
+// func (kv *KVService) GetBatch(requests *kvs.GetBatchRequest, responses *kvs.GetBatchResponse) error {
+// 	responses.Values = make([]kvs.GetResponse, len(requests.Keys))
 
-	kv.stats.puts++
+// 	// kv.Lock()
+// 	kv.RLock() // read lock
+// 	// defer kv.Unlock()
 
-	kv.mp[request.Key] = request.Value
+// 	// kv.stats.gets += uint64(len(requests.Keys))
 
-	return nil
-}
+// 	// for i, g := range requests.Keys {
+// 	// 	responses.Values[i] = kvs.GetResponse{Value: kv.mp[g.Key]}
+// 	// }
+// 	for i, request := range requests.Keys {
+// 		if value, found := kv.mp[request.Key]; found {
+// 			responses.Values[i].Value = value
+// 		}
+// 	}
+// 	kv.RUnlock()
+// 	atomic.AddUint64(&kv.stats.gets, uint64(len(requests.Keys)))
+// 	return nil
+// }
 
-func (kv *KVService) PutBatch(requests *kvs.PutBatchRequest, responses *kvs.PutBatchResponse) error {
-	kv.Lock()
-	defer kv.Unlock()
+// func (kv *KVService) Put(request *kvs.PutRequest, response *kvs.PutResponse) error {
+// 	kv.Lock()
+// 	defer kv.Unlock()
 
-	kv.stats.puts += uint64(len(requests.Items))
+// 	kv.stats.puts++
 
-	for _, item := range requests.Items {
-		kv.mp[item.Key] = item.Value
+// 	kv.mp[request.Key] = request.Value
+
+// 	return nil
+// }
+
+// func (kv *KVService) PutBatch(requests *kvs.PutBatchRequest, responses *kvs.PutBatchResponse) error {
+// 	kv.Lock()
+// 	defer kv.Unlock()
+
+// 	for _, item := range requests.Items {
+// 		kv.mp[item.Key] = item.Value
+// 	}
+
+// 	// kv.stats.puts += uint64(len(requests.Items))
+// 	atomic.AddUint64(&kv.stats.puts, uint64(len(requests.Items)))
+// 	return nil
+// }
+
+func (kv *KVService) PutBatch(req *kvs.PutBatchRequest, _ *kvs.PutBatchResponse) error {
+	// 1) bucket items by shard
+	var buckets [numShards][]int
+	for i, it := range req.Items { // TODO: we can put this operation into client side in the first place.
+		s := kv.shardIdx(it.Key)
+		buckets[s] = append(buckets[s], i)
 	}
-
+	// 2) write each shard in parallel (exclusive)
+	var wg sync.WaitGroup
+	for s := 0; s < numShards; s++ {
+		if len(buckets[s]) == 0 {
+			continue
+		}
+		wg.Add(1)
+		go func(s int, idxs []int) {
+			defer wg.Done()
+			sh := kv.shards[s]
+			sh.Lock()
+			for _, i := range idxs {
+				it := req.Items[i]
+				sh.mp[it.Key] = it.Value
+			}
+			sh.Unlock()
+		}(s, buckets[s])
+	}
+	wg.Wait()
+	atomic.AddUint64(&kv.stats.puts, uint64(len(req.Items)))
 	return nil
 }
 

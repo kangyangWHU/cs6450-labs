@@ -52,7 +52,8 @@ function cluster_size() {
 }
 
 # Get available node count first to determine defaults
-AVAILABLE_COUNT=$(cluster_size)
+# AVAILABLE_COUNT=$(cluster_size)
+AVAILABLE_COUNT=4
 
 # Parse arguments with defaults based on available nodes
 if [ "$#" -eq 0 ]; then

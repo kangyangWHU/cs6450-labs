@@ -32,3 +32,8 @@ type GetBatchResponse struct {
 	Values []GetResponse
 	// Values []string
 }
+
+type ClientBucket struct {
+	GetBuffer GetBatchRequest
+	PutBuffer PutBatchRequest
+}
