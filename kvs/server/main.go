@@ -83,6 +83,87 @@ func (kv *KVService) printStats() {
 		float64(diff.gets+diff.puts)/deltaS)
 }
 
+// BatchGet - optimized for multiple reads
+func (kv *KVService) BatchGet(keys []string) ([]string, error) {
+
+	// Update stats
+	kv.Lock()
+	// Acquire read lock once for all keys
+	// kv.RLock()
+	values := make([]string, len(keys))
+	for i, key := range keys {
+		if value, found := kv.mp[key]; found {
+			values[i] = value
+		}
+	}
+	kv.stats.gets += uint64(len(keys))
+	kv.Unlock()
+
+	return values, nil
+}
+
+func (s *KVService) ProcessBatch(req *kvs.BatchPutGetRequest, resp *kvs.BatchPutGetResponse) error {
+	// batchStart := time.Now()
+
+	// Initialize response array
+	ops := req.Operations
+	n := len(ops)
+	resp.Values = make([]string, n)
+
+	// Reads are batched until we hit a write
+	readKeys := make([]string, 0, n) // Assume most are reads
+	readIndices := make([]int, 0, n) // Track original positions
+
+	for i := 0; i < n; i++ {
+		op := ops[i]
+
+		if op.IsRead {
+			// Collect read operations
+			readKeys = append(readKeys, op.Key)
+			readIndices = append(readIndices, i)
+		} else {
+			// Hit a write - process all collected reads first
+			if len(readKeys) > 0 {
+				values, err := s.BatchGet(readKeys)
+				if err != nil {
+					return err
+				}
+
+				// Copy values to response in original positions
+				for j, respIndex := range readIndices {
+					resp.Values[respIndex] = values[j]
+				}
+				// Reset read batch
+				readKeys = readKeys[:0]
+				readIndices = readIndices[:0]
+			}
+
+			// Process the write operation using put method
+			putReq := &kvs.PutRequest{Key: op.Key, Value: op.Value}
+			putResp := &kvs.PutResponse{}
+			if err := s.Put(putReq, putResp); err != nil {
+				return err
+			}
+
+		}
+	}
+
+	// Process any remaining reads
+	if len(readKeys) > 0 {
+		values, err := s.BatchGet(readKeys)
+		if err != nil {
+			return err
+		}
+
+		// Copy values to response in original positions
+		for j, respIndex := range readIndices {
+			resp.Values[respIndex] = values[j]
+		}
+	}
+
+	return nil
+}
+
 func main() {
 	port := flag.String("port", "8080", "Port to run the server on")
 	flag.Parse()
