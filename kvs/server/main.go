@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/rpc"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/rstutsman/cs6450-labs/kvs"
@@ -26,10 +27,12 @@ func (s *Stats) Sub(prev *Stats) Stats {
 }
 
 type KVService struct {
-	sync.Mutex
-	mp        map[string]string
-	stats     Stats
-	prevStats Stats
+	mu        sync.RWMutex      // protects mp
+	mp        map[string]string // key-value store
+	gets      uint64            // atomic counter
+	puts      uint64            // atomic counter
+	prevStats Stats             // previous snapshot for printing
+	statsMu   sync.Mutex        // protects prevStats & lastPrint
 	lastPrint time.Time
 }
 
@@ -41,126 +44,122 @@ func NewKVService() *KVService {
 }
 
 func (kv *KVService) Get(request *kvs.GetRequest, response *kvs.GetResponse) error {
-	kv.Lock()
-	defer kv.Unlock()
-
-	kv.stats.gets++
-
-	if value, found := kv.mp[request.Key]; found {
+	// Read path: shared lock
+	kv.mu.RLock()
+	value, found := kv.mp[request.Key]
+	kv.mu.RUnlock()
+	atomic.AddUint64(&kv.gets, 1)
+	if found {
 		response.Value = value
 	}
-
 	return nil
 }
 
 func (kv *KVService) Put(request *kvs.PutRequest, response *kvs.PutResponse) error {
-	kv.Lock()
-	defer kv.Unlock()
-
-	kv.stats.puts++
-
+	kv.mu.Lock()
 	kv.mp[request.Key] = request.Value
-
+	kv.mu.Unlock()
+	atomic.AddUint64(&kv.puts, 1)
 	return nil
 }
 
 func (kv *KVService) printStats() {
-	kv.Lock()
-	stats := kv.stats
-	prevStats := kv.prevStats
-	kv.prevStats = stats
+	// Snapshot atomic counters
+	curGets := atomic.LoadUint64(&kv.gets)
+	curPuts := atomic.LoadUint64(&kv.puts)
+
+	kv.statsMu.Lock()
+	prev := kv.prevStats
 	now := time.Now()
 	lastPrint := kv.lastPrint
+	kv.prevStats = Stats{gets: curGets, puts: curPuts}
 	kv.lastPrint = now
-	kv.Unlock()
+	kv.statsMu.Unlock()
 
-	diff := stats.Sub(&prevStats)
+	diffGets := curGets - prev.gets
+	diffPuts := curPuts - prev.puts
 	deltaS := now.Sub(lastPrint).Seconds()
-
+	if deltaS <= 0 {
+		deltaS = 1
+	}
 	fmt.Printf("get/s %0.2f\nput/s %0.2f\nops/s %0.2f\n\n",
-		float64(diff.gets)/deltaS,
-		float64(diff.puts)/deltaS,
-		float64(diff.gets+diff.puts)/deltaS)
+		float64(diffGets)/deltaS,
+		float64(diffPuts)/deltaS,
+		float64(diffGets+diffPuts)/deltaS)
 }
 
 // BatchGet - optimized for multiple reads
 func (kv *KVService) BatchGet(keys []string) ([]string, error) {
-
-	// Update stats
-	kv.Lock()
-	// Acquire read lock once for all keys
-	// kv.RLock()
+	// Shared read lock for all keys
+	kv.mu.RLock()
 	values := make([]string, len(keys))
 	for i, key := range keys {
 		if value, found := kv.mp[key]; found {
 			values[i] = value
 		}
 	}
-	kv.stats.gets += uint64(len(keys))
-	kv.Unlock()
-
+	kv.mu.RUnlock()
+	atomic.AddUint64(&kv.gets, uint64(len(keys)))
 	return values, nil
 }
 
-func (s *KVService) ProcessBatch(req *kvs.BatchPutGetRequest, resp *kvs.BatchPutGetResponse) error {
-	// batchStart := time.Now()
+// BatchPut - optimized for multiple writes
+func (kv *KVService) BatchPut(keys []string, values []string) error {
+	if len(keys) != len(values) {
+		return fmt.Errorf("keys and values length mismatch")
+	}
+	kv.mu.Lock()
+	for i, key := range keys {
+		kv.mp[key] = values[i]
+	}
+	kv.mu.Unlock()
+	atomic.AddUint64(&kv.puts, uint64(len(keys)))
+	return nil
+}
 
-	// Initialize response array
+func (s *KVService) ProcessBatch(req *kvs.BatchPutGetRequest, resp *kvs.BatchPutGetResponse) error {
+	// Original simpler strategy: process maximal consecutive runs of reads, then writes, alternating.
 	ops := req.Operations
 	n := len(ops)
 	resp.Values = make([]string, n)
 
-	// Reads are batched until we hit a write
-	readKeys := make([]string, 0, n) // Assume most are reads
-	readIndices := make([]int, 0, n) // Track original positions
-
-	for i := 0; i < n; i++ {
-		op := ops[i]
-
-		if op.IsRead {
-			// Collect read operations
-			readKeys = append(readKeys, op.Key)
-			readIndices = append(readIndices, i)
-		} else {
-			// Hit a write - process all collected reads first
-			if len(readKeys) > 0 {
-				values, err := s.BatchGet(readKeys)
+	i := 0
+	for i < n {
+		// Collect consecutive reads
+		if i < n && ops[i].IsRead {
+			rKeys := make([]string, 0, 100)
+			rIdxs := make([]int, 0, 100)
+			for i < n && ops[i].IsRead {
+				rKeys = append(rKeys, ops[i].Key)
+				rIdxs = append(rIdxs, i)
+				i++
+			}
+			if len(rKeys) > 0 {
+				values, err := s.BatchGet(rKeys)
 				if err != nil {
 					return err
 				}
-
-				// Copy values to response in original positions
-				for j, respIndex := range readIndices {
-					resp.Values[respIndex] = values[j]
+				for j, idx := range rIdxs {
+					resp.Values[idx] = values[j]
 				}
-				// Reset read batch
-				readKeys = readKeys[:0]
-				readIndices = readIndices[:0]
 			}
-
-			// Process the write operation using put method
-			putReq := &kvs.PutRequest{Key: op.Key, Value: op.Value}
-			putResp := &kvs.PutResponse{}
-			if err := s.Put(putReq, putResp); err != nil {
-				return err
+		}
+		// Collect consecutive writes
+		if i < n && !ops[i].IsRead {
+			wKeys := make([]string, 0, 8)
+			wVals := make([]string, 0, 8)
+			for i < n && !ops[i].IsRead {
+				wKeys = append(wKeys, ops[i].Key)
+				wVals = append(wVals, ops[i].Value)
+				i++
 			}
-
+			if len(wKeys) > 0 {
+				if err := s.BatchPut(wKeys, wVals); err != nil {
+					return err
+				}
+			}
 		}
 	}
-
-	// Process any remaining reads
-	if len(readKeys) > 0 {
-		values, err := s.BatchGet(readKeys)
-		if err != nil {
-			return err
-		}
-
-		// Copy values to response in original positions
-		for j, respIndex := range readIndices {
-			resp.Values[respIndex] = values[j]
-		}
-	}
-
 	return nil
 }
 

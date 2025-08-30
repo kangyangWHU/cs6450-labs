@@ -52,40 +52,115 @@ func (client *Client) Put(key string, value string) {
 }
 
 func runClient(id int, hosts []string, done *atomic.Bool, workload *kvs.Workload, resultsCh chan<- uint64) {
-	masterService := NewDistributedService(hosts)
+	// Create persistent RPC clients for each host
+	clients := make(map[string]*rpc.Client)
+	for _, host := range hosts {
+		client, err := rpc.DialHTTP("tcp", host)
+		if err != nil {
+			log.Printf("Warning: Client %d failed to connect to server %s: %v", id, host, err)
+			continue
+		}
+		clients[host] = client
+		// Don't close until the function exits
+		defer client.Close()
+	}
+
 	value := strings.Repeat("x", 128)
-	const batchSize = 8092 * 16
+
+	// Start with a moderate batch size
+	batchSize := 8092 * 32
 
 	opsCompleted := uint64(0)
 
 	for !done.Load() {
-		// Create a batch request
-		batchReq := &kvs.BatchPutGetRequest{
-			Operations: make([]kvs.BatchOperation, batchSize),
-		}
+		// Number of chunks per server
+		serverCount := len(hosts)
+		chunksPerServer := 1
+		totalChunks := chunksPerServer * serverCount
 
-		// Fill the batch with operations
-		for j := 0; j < batchSize; j++ {
-			op := workload.Next()
-			key := fmt.Sprintf("%d", op.Key)
-			batchReq.Operations[j] = kvs.BatchOperation{
-				Key:    key,
-				Value:  value,
-				IsRead: op.IsRead,
+		// Create multiple batch requests, one for each chunk
+		batchReqs := make([]*kvs.BatchPutGetRequest, totalChunks)
+		for i := range batchReqs {
+			batchReqs[i] = &kvs.BatchPutGetRequest{
+				Operations: make([]kvs.BatchOperation, 0, batchSize),
 			}
 		}
 
-		// Process batch with automatic distribution
-		batchResp := &kvs.BatchPutGetResponse{}
-		if err := masterService.distributeKey(batchReq, batchResp); err != nil {
-			log.Printf("Client %d batch error: %v\n", id, err)
-			continue
+		// Fill batches with operations, distributing by key hash
+		for j := 0; j < batchSize; j++ {
+			op := workload.Next()
+			key := fmt.Sprintf("%d", op.Key)
+
+			// Hash the key to determine which chunk it goes to
+			hash := 0
+			for _, c := range key {
+				hash = (hash*13 + int(c)) % totalChunks
+			}
+
+			// Add operation to the appropriate chunk
+			batchReqs[hash].Operations = append(batchReqs[hash].Operations, kvs.BatchOperation{
+				Key:    key,
+				Value:  value,
+				IsRead: op.IsRead,
+			})
 		}
-		opsCompleted += batchSize
+
+		// Track results with wait group
+		var wg sync.WaitGroup
+		errChan := make(chan error, totalChunks)
+
+		// Process each batch in parallel
+		for i, batchReq := range batchReqs {
+			// Skip if the batch is empty
+			if len(batchReq.Operations) == 0 {
+				continue
+			}
+
+			// Determine which server to send this chunk to (round-robin)
+			serverIdx := i % serverCount
+			serverAddr := hosts[serverIdx]
+
+			wg.Add(1)
+			go func(req *kvs.BatchPutGetRequest, server string) {
+				defer wg.Done()
+
+				// Use the persistent RPC client for this server
+				client := clients[server]
+				if client == nil {
+					errChan <- fmt.Errorf("no connection available to server %s", server)
+					return
+				}
+				// Process batch directly with server
+				batchResp := &kvs.BatchPutGetResponse{}
+				if err := client.Call("KVService.ProcessBatch", req, batchResp); err != nil {
+					errChan <- fmt.Errorf("batch operation failed on server %s: %v", server, err)
+					return
+				}
+			}(batchReq, serverAddr)
+		}
+
+		// Wait for all operations to complete
+		go func() {
+			wg.Wait()
+			close(errChan)
+		}()
+
+		// Check for errors
+		hasError := false
+		for err := range errChan {
+			if err != nil {
+				log.Printf("Client %d batch error: %v\n", id, err)
+				hasError = true
+				break
+			}
+		}
+
+		if !hasError {
+			opsCompleted += uint64(batchSize)
+		}
 	}
 
 	fmt.Printf("Client %d finished operations.\n", id)
-
 	resultsCh <- opsCompleted
 }
 
@@ -97,128 +172,6 @@ func (h *HostList) String() string {
 
 func (h *HostList) Set(value string) error {
 	*h = strings.Split(value, ",")
-	return nil
-}
-
-// For master server
-type MasterServer struct {
-	ServerAddrs []string // List of available server addresses
-}
-
-func (m *MasterServer) GetServerForKey(key string) string {
-	// Simple hash-based distribution
-	hash := 0
-	for _, c := range key {
-		hash = (hash*31 + int(c)) % len(m.ServerAddrs)
-	}
-	return m.ServerAddrs[hash]
-}
-
-type DistributedService struct {
-	master  *MasterServer
-	clients map[string]*rpc.Client
-	stats   struct {
-		processingTime time.Duration
-	}
-}
-
-func NewDistributedService(serverAddrs []string) *DistributedService {
-	master := &MasterServer{
-		ServerAddrs: serverAddrs,
-	}
-
-	clients := make(map[string]*rpc.Client)
-	for _, addr := range serverAddrs {
-		client, err := rpc.DialHTTP("tcp", addr)
-		if err != nil {
-			log.Printf("Warning: Failed to connect to server %s: %v", addr, err)
-			continue
-		}
-		clients[addr] = client
-	}
-
-	return &DistributedService{
-		master:  master,
-		clients: clients,
-	}
-}
-
-func (s *DistributedService) distributeKey(req *kvs.BatchPutGetRequest, resp *kvs.BatchPutGetResponse) error {
-	start := time.Now()
-
-	// Group operations by key and maintain original order for reads
-	serverOps := make(map[string]*kvs.BatchPutGetRequest)
-
-	// Initialize response array
-	resp.Values = make([]string, len(req.Operations))
-	// Group operations by target server
-	for i, op := range req.Operations {
-		// Get target server for this key
-		server := s.master.GetServerForKey(op.Key)
-
-		// Initialize server's batch request if needed
-		if serverOps[server] == nil {
-			serverOps[server] = &kvs.BatchPutGetRequest{
-				Operations: make([]kvs.BatchOperation, 0),
-				Indices:    make([]int, 0), // Track original indices
-			}
-		}
-
-		// Add operation to server's batch
-		serverOps[server].Operations = append(serverOps[server].Operations, op)
-		serverOps[server].Indices = append(serverOps[server].Indices, i)
-	}
-
-	// Track RPC timing
-	// var mu sync.Mutex
-
-	var wg sync.WaitGroup
-	errCh := make(chan error, len(serverOps))
-
-	for server, batchReq := range serverOps {
-		wg.Add(1)
-		go func(server string, req *kvs.BatchPutGetRequest) {
-			defer wg.Done()
-
-			// callStart := time.Now()
-
-			// Get RPC client for this server
-			client := s.clients[server]
-			if client == nil {
-				errCh <- fmt.Errorf("no connection to server %s", server)
-				return
-			}
-
-			// Send batch request to server
-			serverResp := &kvs.BatchPutGetResponse{}
-			if err := client.Call("KVService.ProcessBatch", req, serverResp); err != nil {
-				errCh <- fmt.Errorf("batch operation failed on server %s: %v", server, err)
-				return
-			}
-
-			// Copy results back to original positions
-			for i, val := range serverResp.Values {
-				origIndex := req.Indices[i]
-				resp.Values[origIndex] = val
-			}
-
-		}(server, batchReq)
-	}
-
-	// Wait for all operations to complete
-	go func() {
-		wg.Wait()
-		close(errCh)
-	}()
-
-	// Check for errors
-	for err := range errCh {
-		if err != nil {
-			return err
-		}
-	}
-
-	s.stats.processingTime = time.Since(start)
 	return nil
 }
 
@@ -249,17 +202,22 @@ func main() {
 	resultsCh := make(chan uint64)
 
 	clientId := 0
-	for i := 0; i < 12; i++ {
+	numWorker := 32
+	for i := 0; i < numWorker; i++ {
 		go func(clientId int) {
 			workload := kvs.NewWorkload(*workload, *theta)
 			runClient(clientId, hosts, &done, workload, resultsCh)
+			time.Sleep(100 * time.Millisecond)
 		}(clientId)
 	}
 
 	time.Sleep(time.Duration(*secs) * time.Second)
 	done.Store(true)
 
-	opsCompleted := <-resultsCh
+	opsCompleted := uint64(0)
+	for i := 0; i < numWorker; i++ {
+		opsCompleted += <-resultsCh
+	}
 
 	elapsed := time.Since(start)
 
