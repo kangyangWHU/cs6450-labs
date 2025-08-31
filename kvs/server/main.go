@@ -27,38 +27,33 @@ func (s *Stats) Sub(prev *Stats) Stats {
 }
 
 type KVService struct {
-	mu        sync.RWMutex      // protects mp
-	mp        map[string]string // key-value store
-	gets      uint64            // atomic counter
-	puts      uint64            // atomic counter
-	prevStats Stats             // previous snapshot for printing
-	statsMu   sync.Mutex        // protects prevStats & lastPrint
+	mp        sync.Map   // key-value store (concurrent-safe)
+	gets      uint64     // atomic counter
+	puts      uint64     // atomic counter
+	prevStats Stats      // previous snapshot for printing
+	statsMu   sync.Mutex // protects prevStats & lastPrint
 	lastPrint time.Time
 }
 
 func NewKVService() *KVService {
 	kvs := &KVService{}
-	kvs.mp = make(map[string]string)
+	// sync.Map doesn't need initialization
 	kvs.lastPrint = time.Now()
 	return kvs
 }
 
 func (kv *KVService) Get(request *kvs.GetRequest, response *kvs.GetResponse) error {
-	// Read path: shared lock
-	kv.mu.RLock()
-	value, found := kv.mp[request.Key]
-	kv.mu.RUnlock()
-	atomic.AddUint64(&kv.gets, 1)
-	if found {
-		response.Value = value
+	// Use sync.Map's Load method for concurrent-safe reads
+	if value, found := kv.mp.Load(request.Key); found {
+		response.Value = value.(string)
 	}
+	atomic.AddUint64(&kv.gets, 1)
 	return nil
 }
 
 func (kv *KVService) Put(request *kvs.PutRequest, response *kvs.PutResponse) error {
-	kv.mu.Lock()
-	kv.mp[request.Key] = request.Value
-	kv.mu.Unlock()
+	// Use sync.Map's Store method for concurrent-safe writes
+	kv.mp.Store(request.Key, request.Value)
 	atomic.AddUint64(&kv.puts, 1)
 	return nil
 }
@@ -88,31 +83,27 @@ func (kv *KVService) printStats() {
 		float64(diffGets+diffPuts)/deltaS)
 }
 
-// BatchGet - optimized for multiple reads
+// BatchGet - optimized for multiple reads using sync.Map
 func (kv *KVService) BatchGet(keys []string) ([]string, error) {
-	// Shared read lock for all keys
-	kv.mu.RLock()
 	values := make([]string, len(keys))
 	for i, key := range keys {
-		if value, found := kv.mp[key]; found {
-			values[i] = value
+		if value, found := kv.mp.Load(key); found {
+			values[i] = value.(string)
 		}
+		// values[i] remains empty string if key not found
 	}
-	kv.mu.RUnlock()
 	atomic.AddUint64(&kv.gets, uint64(len(keys)))
 	return values, nil
 }
 
-// BatchPut - optimized for multiple writes
+// BatchPut - optimized for multiple writes using sync.Map
 func (kv *KVService) BatchPut(keys []string, values []string) error {
 	if len(keys) != len(values) {
 		return fmt.Errorf("keys and values length mismatch")
 	}
-	kv.mu.Lock()
 	for i, key := range keys {
-		kv.mp[key] = values[i]
+		kv.mp.Store(key, values[i])
 	}
-	kv.mu.Unlock()
 	atomic.AddUint64(&kv.puts, uint64(len(keys)))
 	return nil
 }

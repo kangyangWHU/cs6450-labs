@@ -202,12 +202,12 @@ func main() {
 	resultsCh := make(chan uint64)
 
 	clientId := 0
-	numWorker := 32
+	numWorker := 64
 	for i := 0; i < numWorker; i++ {
 		go func(clientId int) {
 			workload := kvs.NewWorkload(*workload, *theta)
 			runClient(clientId, hosts, &done, workload, resultsCh)
-			time.Sleep(100 * time.Millisecond)
+			time.Sleep(10 * time.Millisecond)
 		}(clientId)
 	}
 
