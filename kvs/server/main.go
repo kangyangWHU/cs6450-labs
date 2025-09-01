@@ -7,8 +7,11 @@ import (
 	"net"
 	"net/http"
 	"net/rpc"
+	"os"
+	"os/signal"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/rstutsman/cs6450-labs/kvs"
@@ -27,19 +30,25 @@ func (s *Stats) Sub(prev *Stats) Stats {
 }
 
 type KVService struct {
-	mp        sync.Map   // key-value store (concurrent-safe)
-	gets      uint64     // atomic counter
-	puts      uint64     // atomic counter
-	prevStats Stats      // previous snapshot for printing
-	statsMu   sync.Mutex // protects prevStats & lastPrint
-	lastPrint time.Time
+	mp               sync.Map   // key-value store (concurrent-safe)
+	gets             uint64     // atomic counter
+	puts             uint64     // atomic counter
+	prevStats        Stats      // previous snapshot for printing
+	statsMu          sync.Mutex // protects prevStats & lastPrint
+	lastPrint        time.Time
+	metricsCollector *kvs.MetricsCollector // hardware metrics collector
 }
 
 func NewKVService() *KVService {
-	kvs := &KVService{}
+	kvservice := &KVService{}
 	// sync.Map doesn't need initialization
-	kvs.lastPrint = time.Now()
-	return kvs
+	kvservice.lastPrint = time.Now()
+
+	// Initialize metrics collector
+	kvservice.metricsCollector = kvs.NewMetricsCollector()
+	kvservice.metricsCollector.StartCollection(1 * time.Second) // Collect every second
+
+	return kvservice
 }
 
 func (kv *KVService) Get(request *kvs.GetRequest, response *kvs.GetResponse) error {
@@ -77,6 +86,7 @@ func (kv *KVService) printStats() {
 	if deltaS <= 0 {
 		deltaS = 1
 	}
+
 	fmt.Printf("get/s %0.2f\nput/s %0.2f\nops/s %0.2f\n\n",
 		float64(diffGets)/deltaS,
 		float64(diffPuts)/deltaS,
@@ -159,6 +169,17 @@ func main() {
 	flag.Parse()
 
 	kvs := NewKVService()
+	defer func() {
+		kvs.metricsCollector.StopCollection()
+		// Print final hardware metrics
+		fmt.Println("=== SERVER FINAL HARDWARE METRICS ===")
+		kvs.metricsCollector.PrintFinalStats()
+	}()
+
+	// Handle graceful shutdown
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
 	rpc.Register(kvs)
 	rpc.HandleHTTP()
 
@@ -174,6 +195,16 @@ func main() {
 			kvs.printStats()
 			time.Sleep(1 * time.Second)
 		}
+	}()
+
+	// Handle shutdown gracefully
+	go func() {
+		<-sigChan
+		fmt.Println("\nShutting down server...")
+		kvs.metricsCollector.StopCollection()
+		fmt.Println("=== SERVER FINAL HARDWARE METRICS ===")
+		kvs.metricsCollector.PrintFinalStats()
+		os.Exit(0)
 	}()
 
 	http.Serve(l, nil)

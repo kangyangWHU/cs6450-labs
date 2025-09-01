@@ -196,6 +196,15 @@ func main() {
 		hosts, *theta, *workload, *secs,
 	)
 
+	// Initialize and start metrics collection
+	metricsCollector := kvs.NewMetricsCollector()
+	metricsCollector.StartCollection(1 * time.Second) // Collect every second
+	defer func() {
+		metricsCollector.StopCollection()
+		fmt.Println("=== CLIENT FINAL HARDWARE METRICS ===")
+		metricsCollector.PrintFinalStats()
+	}()
+
 	start := time.Now()
 
 	done := atomic.Bool{}
