@@ -5,7 +5,8 @@ import (
 	"fmt"
 	"log"
 	"net/rpc"
-	"strconv"
+
+	// "strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -14,6 +15,10 @@ import (
 	"github.com/rstutsman/cs6450-labs/kvs"
 	// "github.com/rstutsman/cs6450-labs/kvs"
 )
+
+const shardNum = 64 // NOTE: change to RPC
+// each partition should only handles shardNum / partitions shards
+const partitions = 4 // partitions are for the client-side.
 
 type Client struct {
 	rpcClient *rpc.Client
@@ -28,6 +33,28 @@ func Dial(addr string) *Client {
 	}
 
 	return &Client{rpcClient}
+}
+
+func xorFolding(key uint64, total int) int {
+	folded := key ^ (key >> 16) ^ (key >> 32) ^ (key >> 48)
+	// return int(folded % 64)
+	return int(folded % uint64(total))
+}
+
+// Add a fast integer hash function
+func fnv64aInt(key uint64) uint64 {
+	const (
+		offset64 = 1469598103934665603
+		prime64  = 1099511628211
+	)
+	h := uint64(offset64)
+
+	// Hash the 8 bytes of the int64
+	for i := 0; i < 8; i++ {
+		h ^= uint64((key >> (i * 8)) & 0xFF)
+		h *= prime64
+	}
+	return h
 }
 
 // fnv64a is a small, fast non-crypto hash for partitioning.
@@ -47,7 +74,7 @@ func fnv64a(s string) uint64 {
 // Get retrieves the value associated with the specified key from the key-value store.
 // It returns the value as a string. If the key does not exist, it may return an empty string
 // or handle the error based on the implementation.
-func (client *Client) Get(key string) string {
+func (client *Client) Get(key uint64) string {
 	request := kvs.GetRequest{
 		Key: key,
 	}
@@ -67,7 +94,7 @@ func (client *Client) Get(key string) string {
 // Parameters:
 //   - key:   The key to store in the key-value store.
 //   - value: The value associated with the key.
-func (client *Client) Put(key string, value string) {
+func (client *Client) Put(key uint64, value string) {
 	request := kvs.PutRequest{
 		Key:   key,
 		Value: value,
@@ -79,6 +106,93 @@ func (client *Client) Put(key string, value string) {
 	}
 }
 
+// runClientDirect processes operations directly without channels/goroutines
+func runClientDirect(
+	id int,
+	addr string,
+	done *atomic.Bool,
+	workload *kvs.Workload,
+	resultsCh chan<- uint64,
+) {
+	const batchSize = 1024
+
+	client := Dial(addr)
+	value := strings.Repeat("x", 128)
+
+	// Single set of buffers for all shards
+	getsPerShard := make([][]kvs.GetRequest, shardNum)
+	putsPerShard := make([][]kvs.PutRequest, shardNum)
+	for i := 0; i < shardNum; i++ {
+		getsPerShard[i] = make([]kvs.GetRequest, 0, batchSize)
+		putsPerShard[i] = make([]kvs.PutRequest, 0, batchSize)
+	}
+
+	var totalOps uint64
+
+	flushGetShard := func(shardIdx int) {
+		if len(getsPerShard[shardIdx]) > 0 {
+			req := kvs.GetBatchShardedRequest{Shard: shardIdx, Keys: getsPerShard[shardIdx]}
+			var resp kvs.GetBatchResponse
+			if err := client.rpcClient.Call("KVService.GetBatchSharded", &req, &resp); err != nil {
+				log.Fatal(err)
+			}
+			totalOps += uint64(len(getsPerShard[shardIdx]))
+			getsPerShard[shardIdx] = getsPerShard[shardIdx][:0]
+		}
+	}
+
+	flushPutShard := func(shardIdx int) {
+		if len(putsPerShard[shardIdx]) > 0 {
+			req := kvs.PutBatchShardedRequest{Shard: shardIdx, Items: putsPerShard[shardIdx]}
+			var resp kvs.PutBatchResponse
+			if err := client.rpcClient.Call("KVService.PutBatchSharded", &req, &resp); err != nil {
+				log.Fatal(err)
+			}
+			totalOps += uint64(len(putsPerShard[shardIdx]))
+			putsPerShard[shardIdx] = putsPerShard[shardIdx][:0]
+		}
+	}
+
+	flushAllShards := func() {
+		for i := 0; i < shardNum; i++ {
+			flushGetShard(i)
+			flushPutShard(i)
+		}
+	}
+
+	// Direct processing loop - no channels!
+	for !done.Load() {
+		op := workload.Next()
+
+		// Use fastest hash function from our evaluation
+		shardIdx := int((op.Key * 0x9e3779b97f4a7c15) % uint64(shardNum))
+
+		if op.IsRead {
+			// Flush pending puts for this shard
+			if len(putsPerShard[shardIdx]) > 0 {
+				flushPutShard(shardIdx)
+			}
+			getsPerShard[shardIdx] = append(getsPerShard[shardIdx], kvs.GetRequest{Key: op.Key})
+			if len(getsPerShard[shardIdx]) >= batchSize {
+				flushGetShard(shardIdx)
+			}
+		} else {
+			// Flush pending gets for this shard
+			if len(getsPerShard[shardIdx]) > 0 {
+				flushGetShard(shardIdx)
+			}
+			putsPerShard[shardIdx] = append(putsPerShard[shardIdx], kvs.PutRequest{Key: op.Key, Value: value})
+			if len(putsPerShard[shardIdx]) >= batchSize {
+				flushPutShard(shardIdx)
+			}
+		}
+	}
+
+	flushAllShards()
+	fmt.Printf("Client %d finished operations.\n", id)
+	resultsCh <- totalOps
+}
+
 // runClientPartitioned sends ops to P independent partitions.
 // Each partition keeps its own GET/PUT buffers and flushes them via batch RPCs.
 func runClientPartitioned(
@@ -88,7 +202,7 @@ func runClientPartitioned(
 	workload *kvs.Workload,
 	resultsCh chan<- uint64,
 ) {
-	const partitions = 4
+
 	const batchSize = 1024
 
 	// One RPC connection per partition (to avoid HOL on a single conn).
@@ -98,12 +212,13 @@ func runClientPartitioned(
 	}
 
 	type Op struct {
-		key    string
-		isRead bool
+		// key    string
+		key    uint64
 		value  string
+		isRead bool
 	}
 
-	// One channel per partition; no shared mutation -> no locks.
+	// One channel per partition.
 	partCh := make([]chan Op, partitions)
 	for i := 0; i < partitions; i++ {
 		partCh[i] = make(chan Op, 4096) // 4096 Ops buffer for each channel.
@@ -118,27 +233,76 @@ func runClientPartitioned(
 		go func(p int, in <-chan Op, client *Client) {
 			defer wg.Done()
 
-			gets := make([]kvs.GetRequest, 0, batchSize)
-			puts := make([]kvs.PutRequest, 0, batchSize)
+			getsPerShard := make([][]kvs.GetRequest, shardNum)
+			putsPerShard := make([][]kvs.PutRequest, shardNum)
+			for i := 0; i < shardNum; i++ {
+				getsPerShard[i] = make([]kvs.GetRequest, 0, batchSize)
+				putsPerShard[i] = make([]kvs.PutRequest, 0, batchSize)
+			}
 
-			flush := func() { // RH: a flush closure that flushes gets and puts buffer
-				if len(gets) > 0 {
-					req := kvs.GetBatchRequest{Keys: gets}
-					var resp kvs.GetBatchResponse
-					if err := client.rpcClient.Call("KVService.GetBatch", &req, &resp); err != nil {
-						log.Fatal(err)
-					}
-					atomic.AddUint64(&totalOps, uint64(len(gets)))
-					gets = gets[:0]
+			// puts := make([]kvs.PutRequest, 0, batchSize)
+
+			flushGetPerShardNoCheck := func(shardIdx int) {
+				gets := getsPerShard[shardIdx]
+				// getsNum := getsPerShardNum[shardIdx]
+				req := kvs.GetBatchShardedRequest{Shard: shardIdx, Keys: gets}
+				var resp kvs.GetBatchResponse
+				if err := client.rpcClient.Call("KVService.GetBatchSharded", &req, &resp); err != nil {
+					log.Fatal(err)
 				}
-				if len(puts) > 0 {
-					req := kvs.PutBatchRequest{Items: puts}
-					var resp kvs.PutBatchResponse
-					if err := client.rpcClient.Call("KVService.PutBatch", &req, &resp); err != nil {
-						log.Fatal(err)
+				atomic.AddUint64(&totalOps, uint64(len(gets))) // NOTE: can optimize
+				getsPerShard[shardIdx] = gets[:0]
+			}
+
+			flushPutPerShardNoCheck := func(shardIdx int) {
+				puts := putsPerShard[shardIdx]
+				req := kvs.PutBatchShardedRequest{Shard: shardIdx, Items: puts}
+				var resp kvs.PutBatchResponse
+				if err := client.rpcClient.Call("KVService.PutBatchSharded", &req, &resp); err != nil {
+					log.Fatal(err)
+				}
+				atomic.AddUint64(&totalOps, uint64(len(puts)))
+				putsPerShard[shardIdx] = puts[:0]
+			}
+
+			// flush := func() {
+			// flushPerShard := func(shardIdx int) {
+			// 	gets := getsPerShard[shardIdx]
+			// 	getsNum := getsPerShardNum[shardIdx]
+			// 	if getsNum > 0 {
+			// 		req := kvs.GetBatchShardedRequest{Shard: shardIdx, Keys: gets}
+			// 		var resp kvs.GetBatchResponse
+			// 		if err := client.rpcClient.Call("KVService.GetBatchSharded", &req, &resp); err != nil {
+			// 			log.Fatal(err)
+			// 		}
+			// 		atomic.AddUint64(&totalOps, uint64(len(gets))) // NOTE: can optimize
+			// 		// gets = gets[:0]
+			// 		getsPerShard[shardIdx] = gets[:0]
+			// 	}
+			// 	// if puts, exists := putsPerShard[shardIdx]; exists && len(puts) > 0 {
+			// 	puts := putsPerShard[shardIdx]
+			// 	putsNum := putsPerShardNum[shardIdx]
+			// 	if putsNum > 0 {
+			// 		req := kvs.PutBatchShardedRequest{Shard: shardIdx, Items: puts}
+			// 		var resp kvs.PutBatchResponse
+			// 		if err := client.rpcClient.Call("KVService.PutBatchSharded", &req, &resp); err != nil {
+			// 			log.Fatal(err)
+			// 		}
+			// 		atomic.AddUint64(&totalOps, uint64(len(puts)))
+			// 		// puts = puts[:0]
+			// 		// delete(putsPerShard, shardIdx)
+			// 		putsPerShard[shardIdx] = puts[:0]
+			// 	}
+			// }
+
+			flushAllShards := func() {
+				for shardIdx := 0; shardIdx < shardNum; shardIdx++ {
+					if len(getsPerShard[shardIdx]) > 0 {
+						flushGetPerShardNoCheck(shardIdx)
 					}
-					atomic.AddUint64(&totalOps, uint64(len(puts)))
-					puts = puts[:0]
+					if len(putsPerShard[shardIdx]) > 0 {
+						flushPutPerShardNoCheck(shardIdx)
+					}
 				}
 			}
 
@@ -152,30 +316,34 @@ func runClientPartitioned(
 				o, ok := <-in
 				if !ok {
 					// Drain & exit.
-					if len(gets) > 0 || len(puts) > 0 {
-						flush()
-					}
+					flushAllShards()
 					return
 				}
+
+				// Use fastest hash function from our evaluation
+				shardIdx := int((o.key * 0x9e3779b97f4a7c15) % uint64(shardNum))
+
 				if o.isRead {
-					gets = append(gets, kvs.GetRequest{Key: o.key})
-					if len(gets) >= batchSize {
-						flush()
+					if len(putsPerShard[shardIdx]) > 0 {
+						flushPutPerShardNoCheck(shardIdx)
+					}
+					getsPerShard[shardIdx] = append(getsPerShard[shardIdx], kvs.GetRequest{Key: o.key})
+					if len(getsPerShard[shardIdx]) >= batchSize {
+						flushGetPerShardNoCheck(shardIdx)
 					}
 				} else {
-					// Preserve your original rule: flush pending GETs before switching to PUTs.
-					// (Matches your current single-buffer logic.) :contentReference[oaicite:6]{index=6}
-					if len(gets) > 0 {
-						flush()
+					if len(getsPerShard[shardIdx]) > 0 {
+						flushGetPerShardNoCheck(shardIdx)
 					}
-					puts = append(puts, kvs.PutRequest{Key: o.key, Value: o.value})
-					if len(puts) >= batchSize {
-						flush()
+					putsPerShard[shardIdx] = append(putsPerShard[shardIdx], kvs.PutRequest{Key: o.key, Value: o.value})
+					if len(putsPerShard[shardIdx]) >= batchSize {
+						flushPutPerShardNoCheck(shardIdx)
 					}
 				}
 				// case <-ticker.C:
-				// if len(gets) > 0 || len(puts) > 0 {
-				// flush()
+				// flushAllShards()
+				// if len(getsPerShard[shardIdx]) > 0 || len(putsPerShard[shardIdx]) > 0 {
+				// flushPerShard(shardIdx)
 				// }
 				// }
 			}
@@ -186,16 +354,20 @@ func runClientPartitioned(
 	value := strings.Repeat("x", 128)
 	for !done.Load() {
 		// Super-batch just to amortize Next(); individual partitions still micro-batch/flush.
-		for j := 0; j < batchSize; j++ {
-			op := workload.Next() // existing generator :contentReference[oaicite:7]{index=7}
-			key := strconv.FormatInt(int64(op.Key), 10)
-			p := int(fnv64a(key) % uint64(partitions))
-			if op.IsRead {
-				partCh[p] <- Op{key: key, isRead: true}
-			} else {
-				partCh[p] <- Op{key: key, isRead: false, value: value}
-			}
+		// for j := 0; j < batchSize; j++ {
+		op := workload.Next() // existing generator :contentReference[oaicite:7]{index=7}
+		// key := strconv.FormatInt(int64(op.Key), 10)
+		// p := op.Key % partitions // NOTE: add support to align with distribution.
+		// p := op.Key >> (64 - 6)
+		// p := int(fnv64aInt(op.Key) % uint64(partitions)) // Better hash for int keys.
+		p := xorFolding(op.Key, partitions)
+		// p := int(fnv64a(key) % uint64(partitions)) // Speed up here.
+		if op.IsRead {
+			partCh[p] <- Op{key: op.Key, isRead: true}
+		} else {
+			partCh[p] <- Op{key: op.Key, isRead: false, value: value}
 		}
+		// }
 	}
 
 	// Signal workers to stop and flush.
@@ -267,7 +439,8 @@ func runClient2(id int, addr string, done *atomic.Bool, workload *kvs.Workload, 
 	for !done.Load() {
 		for j := 0; j < batchSize; j++ {
 			op := workload.Next()
-			key := strconv.FormatInt(int64(op.Key), 10)
+			// key := strconv.FormatInt(int64(op.Key), 10)
+			key := op.Key
 
 			if op.IsRead {
 				if len(putBuffer) > 0 { // if we already have puts pending, then flush it
@@ -328,7 +501,8 @@ func runClient(id int, addr string, done *atomic.Bool, workload *kvs.Workload, r
 		for j := 0; j < batchSize; j++ {
 			op := workload.Next()
 			// key := fmt.Sprintf("%d", op.Key)
-			key := strconv.FormatInt(int64(op.Key), 10)
+			// key := strconv.FormatInt(int64(op.Key), 10)
+			key := op.Key
 			if op.IsRead {
 				client.Get(key)
 			} else {
@@ -383,7 +557,7 @@ func main() {
 
 	done := atomic.Bool{}
 	// resultsCh := make(chan uint64)
-	clientNum := 16 // RH: align with CPU cores
+	clientNum := 8 // RH: align with CPU cores
 	resultsChs := make([]chan uint64, clientNum)
 	for i := 0; i < clientNum; i++ {
 		resultsChs[i] = make(chan uint64)
@@ -393,7 +567,7 @@ func main() {
 	for clientId := 0; clientId < clientNum; clientId++ {
 		go func(clientId int) {
 			workload := kvs.NewWorkload(*workload, *theta)
-			runClientPartitioned(clientId, host, &done, workload, resultsChs[clientId])
+			runClientDirect(clientId, host, &done, workload, resultsChs[clientId])
 		}(clientId)
 	}
 

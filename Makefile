@@ -4,8 +4,10 @@
 BIN_DIR := bin
 SERVER_BINARY := $(BIN_DIR)/kvsserver
 CLIENT_BINARY := $(BIN_DIR)/kvsclient
+EVAL_BINARY := $(BIN_DIR)/evaluate_distribution
 SERVER_PKG := ./kvs/server
 CLIENT_PKG := ./kvs/client
+EVAL_PKG := .
 
 # Go parameters
 GOCMD := go
@@ -29,11 +31,13 @@ help:
 	@echo 'Targets:'
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  %-15s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
-build: build-server build-client ## Build both server and client binaries (default)
+build: build-server build-client build-eval ## Build server, client, and evaluation binaries (default)
 
 build-server: $(SERVER_BINARY) ## Build the KVS server binary
 
 build-client: $(CLIENT_BINARY) ## Build the KVS client binary
+
+build-eval: $(EVAL_BINARY) ## Build the distribution evaluation binary
 
 $(SERVER_BINARY): $(BIN_DIR) $(wildcard kvs/server/*.go) $(wildcard kvs/*.go)
 	@echo "Building KVS server..."
@@ -42,6 +46,10 @@ $(SERVER_BINARY): $(BIN_DIR) $(wildcard kvs/server/*.go) $(wildcard kvs/*.go)
 $(CLIENT_BINARY): $(BIN_DIR) $(wildcard kvs/client/*.go) $(wildcard kvs/*.go)
 	@echo "Building KVS client..."
 	$(GOBUILD) $(BUILD_FLAGS) -o $(CLIENT_BINARY) $(CLIENT_PKG)
+
+$(EVAL_BINARY): $(BIN_DIR) evaluate_distribution.go $(wildcard kvs/*.go)
+	@echo "Building distribution evaluation tool..."
+	$(GOBUILD) $(BUILD_FLAGS) -o $(EVAL_BINARY) $(EVAL_PKG)/evaluate_distribution.go
 
 $(BIN_DIR):
 	@mkdir -p $(BIN_DIR)
@@ -95,4 +103,12 @@ clean: ## Clean build artifacts
 check: fmt vet test ## Run format, vet, and test
 
 rebuild: clean build ## Clean and rebuild everything
+
+eval-dist: build-eval ## Run distribution evaluation with default parameters (YCSB-B, theta=0.99, 100k ops)
+	@echo "Running workload distribution evaluation..."
+	$(EVAL_BINARY) YCSB-B 0.99 100000
+
+eval-dist-quick: build-eval ## Run quick distribution evaluation (10k ops)
+	@echo "Running quick workload distribution evaluation..."
+	$(EVAL_BINARY) YCSB-B 0.99 10000
 
