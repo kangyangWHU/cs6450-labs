@@ -43,12 +43,13 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOG_ROOT="${ROOT}/logs"
 
 function cluster_size() {
-    geni-get -a | \
-        grep -Po '<host name=\\".*?\"' | \
-        sed 's/<host name=\\"\(.*\)\\"/\1/' | \
-        sort | \
-        uniq | \
-        wc -l
+    # geni-get -a | \
+    #     grep -Po '<host name=\\".*?\"' | \
+    #     sed 's/<host name=\\"\(.*\)\\"/\1/' | \
+    #     sort | \
+    #     uniq | \
+    #     wc -l
+    echo 4
 }
 
 # Get available node count first to determine defaults
