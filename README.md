@@ -190,10 +190,12 @@ Another key takeaway was the importance of workload characteristics and measurem
 
 3. **Memory Optimization**: Implement memory pools and object reuse to reduce garbage collection pressure during high-throughput operations. Current metrics show moderate memory usage, suggesting room for optimization.
 
+4. **Hot key Optimization**: We found the key distribution is skewed toward the lower integers, it could further improve the performance if we could make some optimization for this issue, like hot key cache.
+
 ### Individual Contributions
 |     Member    |                                    Contributions                                   |
 |:-------------:|:----------------------------------------------------------------------------------:|
 |    Hao Ren    |                  Key Distribution Strategy, Client Batch Operation                 |
 | ChenCheng Mao |           Protocol Buffers Optimization, Serialization Protocol Selection          |
 |   Kang Yang   | Performance Bottleneck Analysis, Server Shards Operation, Master Server Operation. |
-|   Yujin Son   |             Server Map Optimization, Server Batch Get Operation.             |
+|   Yujin Song   |             Server Map Optimization, Server Batch Get Operation.             |
