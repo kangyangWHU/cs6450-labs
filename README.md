@@ -6,7 +6,7 @@
 ### Final Throughput Numbers
 - **Throughput Achieved:** 
 
-### Hardware Utilization Metrics:**
+### Hardware Utilization Metrics:
 
 | Component | Metric | Average | Peak |
 |-----------|--------|---------|------|
@@ -20,8 +20,10 @@
 |           | Network TX | 5.15 Gb/s | 8.04 Gb/s |
 
 ### Scaling Characteristics
-| Nodes | 2 | 4 | 6 | 8 
-| | 4,519,256 op/s | 12,390,862 | | |
+| Nodes | 2         | 4          | 6 | 8 |
+|-------|-----------|------------|---|---|
+| Ops/s | 4,519,256 | 12,390,862 |   |   |
+
 
 ### Performance Graphs and Visualizations
 [Insert graphs and visualizations here]
@@ -51,10 +53,24 @@
 
 **Sync.Map Selection**: Traditional mutex-protected maps become bottlenecks under high read concurrency because all reads must acquire locks. Go's `sync.Map` uses copy-on-write semantics and atomic operations, allowing multiple concurrent readers without contention. This is particularly beneficial for read-heavy workloads like YCSB-B (95% reads, 5% writes).
 
-- **Batch Operation Processing**: 
+**Batch Operation Processing**: The `ProcessBatch` method optimizes mixed read/write workloads by grouping consecutive operations of the same type together. For YCSB-B's 95% read workload, this reduces context switching between read and write operations and allows the system to process large consecutive runs of reads using the optimized `BatchGet` method. While the performance gain is modest compared to batching and sync.Map, it eliminates unnecessary mode switches in the processing pipeline.
+
+**Code Requirements Compliance**: Our batching implementation maintains full compliance with HW1.md requirements. Every operation from `workload.Next()` is preserved and executed without modification or skipping. The original YCSB-B distribution (95% reads, 5% writes, θ=0.99) remains unchanged. Batching is purely a network optimization that aggregates operations into efficient RPC calls while preserving operation order, key distribution, and linearizable semantics. We use one workload generator per worker thread (64 total), staying within assignment limits.
 
 ### Trade-offs and Alternatives Considered
-[Discuss trade-offs and design alternatives.]
+
+**Batching Size Trade-offs**: We chose a large batch size (8092*32 ≈ 259,000 operations) to maximize network efficiency. While this significantly reduces RPC overhead, it introduces higher per-request latency since individual requests must wait for the entire batch to complete. For latency-sensitive applications, a smaller batch size would be more appropriate, but our throughput-focused optimization justifies this trade-off.
+
+**Alternative Concurrency Models**: We considered several alternatives to sync.Map:
+
+- **Traditional mutex with read-write locks**: Would still serialize concurrent reads
+- **Lock-free data structures**: More complex to implement and maintain
+- **Sharded maps with separate locks**: Would reduce contention but add complexity
+- **sync.Map proved optimal for our read-heavy workload with minimal implementation complexity**
+
+**Key Distribution Strategy**: Our simple hash-based distribution `(hash*13 + int(c)) % totalChunks` ensures even load distribution but doesn't account for hot keys. More sophisticated approaches like consistent hashing or locality-aware placement could improve performance for real-world workloads with access patterns different from YCSB-B.
+
+**Serialization Protocol Selection**: We evaluated Protocol Buffers as an alternative to Go's native gob encoding, expecting improved performance from more compact binary representation. However, this optimization proved ineffective because: (1) the system was already CPU and network saturated, (2) batching made per-operation serialization costs negligible, and (3) Go's gob encoding was already sufficiently efficient for our simple string-based data structures.
 
 ### Performance Bottleneck Analysis
 
@@ -78,30 +94,85 @@ The metrics show peak network throughput of 9.59 Gbps RX and 8.17 Gbps TX on ser
 ## Reproducibility
 
 ### Step-by-Step Instructions
-1. [Insert step-by-step instructions to reproduce results.]
+
+1. **Environment Setup**:
+
+   ```bash
+   /proj/utah-cs6450-PG0/bin/setup-nfs
+   /proj/utah-cs6450-PG0/bin/install-go
+   source ~/.bashrc
+   ```
+2. **Code Deployment**:
+
+   ```bash
+   git clone <your-repository>
+   cd cs6450-labs
+   git checkout pa1-turnin 
+   ```
+3. **Build and Run**:
+
+   ```bash
+   # Build the optimized version
+   make clean && make
+
+   # Run the cluster benchmark (default 30 seconds)
+   ./run-cluster.sh <server_count> <client_count>
+   ```
+4. **Results Collection**:
+
+   - Performance metrics are displayed in terminal output
+   - Detailed logs saved in `logs/latest/` directory
+   - Hardware metrics included in each component's log file
 
 ### Hardware Requirements and Setup
-- [Insert hardware requirements.]
+
+- **CloudLab m510 machines**: Maximum 8 nodes 
+- **Network**: 10 Gbps Ethernet, use only 10.10.1.x interfaces
 
 ### Software Dependencies and Installation
-- [Insert software dependencies and installation steps.]
+
+- **Go 1.21+**: Installed via `/proj/utah-cs6450-PG0/bin/install-go`
+- **Ubuntu 24.04**: Standard CloudLab image
+- **NFS**: Inter-node file sharing via `/proj/utah-cs6450-PG0/bin/setup-nfs`
 
 ### Configuration Parameters
-- [Insert configuration parameters and their effects.]
+
+- **Batch Size**: `8092*32` operations per batch (configurable in `kvs/client/main.go`)
+- **Worker Threads**: 64 concurrent workers per client node (configurable via `numWorker`)
+- **Runtime**: Default 30 seconds (configurable via `--client-args "-secs X"`)
+- **Key Distribution**: Hash-based distribution across server chunks
 
 ## Reflections
 
 ### Lessons Learned
-[Discuss what was learned from the assignment.]
+
+In this assignment, we observed that system optimization is a process of continuously shifting bottlenecks. In the initial implementation, frequent RPC calls and network round-trips limited throughput to around 1.2M ops/s. After introducing batched requests and persistent connections, network overhead was significantly reduced and the bottleneck moved to the CPU. Measurements showed client CPU utilization above 80% and server utilization close to 77%, while network bandwidth was nearly saturated. This demonstrated that optimization is never a one-time effort: solving one bottleneck inevitably requires re-examining the system to identify the next limiting factor.
+
+Another key takeaway was the importance of workload characteristics and measurement-driven analysis. Under the YCSB-B workload (95% reads, 5% writes, highly skewed distribution), the read-optimized behavior of sync.Map proved highly effective, while batching increased overall throughput at the cost of slightly higher per-request latency. The integrated metrics collection module on both clients and servers provided direct evidence of these trade-offs, preventing guesswork and highlighting that effective system optimization must be grounded in empirical measurements rather than intuition.
+
 
 ### Optimizations That Worked Well
-[Explain what optimizations worked well and why.]
 
-### Challenges and Lessons Learned
-[Discuss what didn't work and lessons learned.]
+**Batching Operations**: The most impactful optimization was implementing batched RPC calls. By grouping ~259,000 operations per batch, we reduced network round trips by orders of magnitude. This single change improved throughput from ~1.2M ops/s to over 5M ops/s, demonstrating that network latency was indeed the primary bottleneck in the original implementation.
+
+**Sync.Map for Concurrent Reads**: Replacing mutex-protected maps with Go's `sync.Map` provided significant performance gains for our read-heavy workload. The lock-free read operations allowed all 64 worker threads to access the key-value store concurrently without contention, particularly effective given YCSB-B's 95% read ratio.
+
+### What didn't work 
+
+**Protocol Buffers Optimization Ineffectiveness**: We implemented Protocol Buffers to reduce serialization overhead, expecting significant performance gains from more efficient binary encoding. However, throughput remained virtually unchanged. This can be explained by several factors:
+
+1. **Already CPU-bound system**: With CPU utilization at 76-82% average and 99%+ peaks, the system was already CPU-constrained. Any serialization improvements were overshadowed by computational bottlenecks.
+2. **Batching dominates performance**: Since we're sending ~259,000 operations per batch, the serialization cost per operation becomes negligible compared to the massive RPC overhead reduction from batching. The marginal serialization improvement from protobuf is lost in the noise.
+3. **Go's native RPC efficiency**: Go's gob encoding is already quite efficient for simple data structures like our key-value pairs. The overhead difference between gob and protobuf becomes minimal when dealing with string keys and values.
+4. **Network bandwidth not the bottleneck**: With network utilization at ~9.8 Gbps peak (near the 10 Gbps limit), the system was already efficiently using available bandwidth. Slightly smaller message sizes from protobuf couldn't improve throughput when network capacity was already saturated.
 
 ### Ideas for Further Improvement
-[Provide ideas for further improvement.]
+
+**Adaptive Batching**: Implement dynamic batch sizing based on current system load and latency requirements. Under high load, increase batch sizes for throughput; under low load, reduce batch sizes for better latency.
+
+**Server-Side Parallelism**: Add support for multiple server instances with automatic load balancing and consistent hashing for key distribution. This would enable horizontal scaling beyond single-server limitations.
+
+**Memory Optimization**: Implement memory pools and object reuse to reduce garbage collection pressure during high-throughput operations. Current metrics show moderate memory usage, suggesting room for optimization.
 
 ### Individual Contributions
 [Provide a short note on individual contributions from each team member.]
