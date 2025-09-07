@@ -6,7 +6,7 @@
 ### Final Throughput Numbers
 - **Throughput Achieved:** 
 
-### Hardware Utilization Metrics:**
+### Hardware Utilization Metrics:
 
 | Component | Metric | Average | Peak |
 |-----------|--------|---------|------|
@@ -20,8 +20,10 @@
 |           | Network TX | 5.15 Gb/s | 8.04 Gb/s |
 
 ### Scaling Characteristics
-| Nodes | 2 | 4 | 6 | 8 
-| | 4,519,256 op/s | 12,390,862 | | |
+| Nodes | 2         | 4          | 6 | 8 |
+|-------|-----------|------------|---|---|
+| Ops/s | 4,519,256 | 12,390,862 |   |   |
+
 
 ### Performance Graphs and Visualizations
 [Insert graphs and visualizations here]
