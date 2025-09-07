@@ -4,9 +4,9 @@
 ## Results
 
 ### Final Throughput Numbers
-- **Throughput Achieved:** 
+- **Throughput Achieved:** 25,948,794 Ops/s
 
-### Hardware Utilization Metrics:
+### Hardware Utilization Metrics: 
 
 | Component | Metric | Average | Peak |
 |-----------|--------|---------|------|
@@ -19,14 +19,15 @@
 |           | Network RX | 6.05 Gb/s | 9.31 Gb/s |
 |           | Network TX | 5.15 Gb/s | 8.04 Gb/s |
 
+RX and TX means reciving traffic and transmitting traffic.
 ### Scaling Characteristics
 | Nodes | 2         | 4          | 6 | 8 |
 |-------|-----------|------------|---|---|
-| Ops/s | 4,519,256 | 12,390,862 |   |   |
+| Ops/s | 4,519,256 | 12,390,862 |17,423,557|25,948,794|
 
 
 ### Performance Graphs and Visualizations
-[Insert graphs and visualizations here]
+![Throughput Scaling with Nodes](throughput_scaling.png)
 
 ### Performance Grading Scale (YCSB-B, θ = 0.99)
 - 100% grade: ≥ 12,800,000 op/s
@@ -38,12 +39,13 @@
 #### Client Side
 - **Batch Processing**: Implemented `BatchPutGetRequest` to group multiple operations (up to 8092*32 per batch) into single RPC calls, dramatically reducing network overhead and RPC call frequency. This improves the performance over ten times.
 - **Key Distribution via Hashing**: Added consistent key hashing to distribute operations across multiple server chunks, ensuring balanced load distribution across all available servers. This will increase the peroformance linearly with the increasement of the number of client and server.
-- **Optimized Worker Configuration**: Deployed 64 concurrent client workers to maximize throughput while maintaining system stability. This will increase the peroformance linearly until reaching a pleato. 
+- **Optimized Worker Configuration**: Deployed 64 concurrent client workers to maximize throughput while maintaining system stability. This will increase the performance linearly until reaching a plateau.
 
 #### Server Side
 - **Sync.Map for Concurrent Operations**: Replaced traditional mutex-protected maps with Go's `sync.Map` to enable lock-free concurrent reads, significantly improving read performance under high concurrency. This will increase the performance over 50%.
-- **Batch Operation Processing**: Implemented `ProcessBatch` method that handles mixed read/write operations in batches, processing consecutive operations of the same type together. This only slight improve the perofmance.
-- **Atomic Counters**: Used atomic operations for statistics tracking to avoid contention during high-frequency operations. It slightly 
+- **Batch Operation Processing**: Implemented `ProcessBatch` method that handles mixed read/write operations in batches, processing consecutive operations of the same type together. This only slightly improves the performance.
+- **Atomic Counters**: Used atomic operations for statistics tracking to avoid contention during high-frequency operations. This only slightly improves the performance.
+ 
 
 ### Rationale for Design Choices
 
@@ -81,7 +83,6 @@ The metrics show peak network throughput of 9.59 Gbps RX and 8.17 Gbps TX on ser
 
 **CPU Profiling and Tracing**: System-level CPU monitoring revealed average CPU utilization of 76.92% on servers and 82.87% on clients, with peaks reaching 98.81% and 99.33% respectively. This high CPU utilization suggests the optimizations successfully shifted the bottleneck from network/RPC overhead to computational processing, which is the desired outcome.
 
-**Memory Usage Analysis**: Memory profiling shows relatively low memory consumption (18-24% peak usage), indicating that the `sync.Map` implementation and batching strategies are memory-efficient. The consistent memory usage pattern suggests no memory leaks or excessive allocations during high-throughput operations.
 
 **Bottleneck Identification Results**:
 1. **Pre-optimization**: Network latency and RPC call frequency were the primary bottlenecks
@@ -105,18 +106,15 @@ The metrics show peak network throughput of 9.59 Gbps RX and 8.17 Gbps TX on ser
 2. **Code Deployment**:
 
    ```bash
-   git clone <your-repository>
+   git clone https://github.com/kangyangWHU/cs6450-labs.git
    cd cs6450-labs
    git checkout pa1-turnin 
    ```
 3. **Build and Run**:
 
    ```bash
-   # Build the optimized version
-   make clean && make
-
-   # Run the cluster benchmark (default 30 seconds)
-   ./run-cluster.sh <server_count> <client_count>
+   # Run the cluster benchmark (default 30 seconds), half server and half clients
+   ./run-cluster.sh
    ```
 4. **Results Collection**:
 
@@ -166,6 +164,13 @@ Another key takeaway was the importance of workload characteristics and measurem
 3. **Go's native RPC efficiency**: Go's gob encoding is already quite efficient for simple data structures like our key-value pairs. The overhead difference between gob and protobuf becomes minimal when dealing with string keys and values.
 4. **Network bandwidth not the bottleneck**: With network utilization at ~9.8 Gbps peak (near the 10 Gbps limit), the system was already efficiently using available bandwidth. Slightly smaller message sizes from protobuf couldn't improve throughput when network capacity was already saturated.
 
+**Server Key Batch Operation.** We also tried grouping the keys in batches, then using go routines to parallelize the operation for each key. But we found that, even though there are some hot keys, the number of operations for the same key is typically small. However, the time cost of grouping the key is even higher than the reduced time by parallel key. 
+
+**Server Shards Operation.** We also tried to split the server Map into several different maps and distributed different keys to different maps. However, this doesn’t help since we now need two locks for one key operation (one lock for the map and one for the key), even though this may reduce the key conflict. 
+
+**Master Server Operation.** We also tried to send all requests to one master server, then this master server sends the request to other normal servers according to the key.  But we found that this master server can be totally eliminated since it only does key distribution, which can be delegated to the client. 
+
+
 ### Ideas for Further Improvement
 
 **Adaptive Batching**: Implement dynamic batch sizing based on current system load and latency requirements. Under high load, increase batch sizes for throughput; under low load, reduce batch sizes for better latency.
@@ -175,4 +180,9 @@ Another key takeaway was the importance of workload characteristics and measurem
 **Memory Optimization**: Implement memory pools and object reuse to reduce garbage collection pressure during high-throughput operations. Current metrics show moderate memory usage, suggesting room for optimization.
 
 ### Individual Contributions
-[Provide a short note on individual contributions from each team member.]
+|     Member    |                                    Contributions                                   |
+|:-------------:|:----------------------------------------------------------------------------------:|
+|    Hao Ren    |                  Key Distribution Strategy, Client Batch Operation                 |
+| ChenCheng Mao |           Protocol Buffers Optimization, Serialization Protocol Selection          |
+|   Kang Yang   | Performance Bottleneck Analysis, Server Shards Operation, Master Server Operation. |
+|   Yujin Son   |             Server Map Optimization(Lock), Server Batch Get Operation.             |
