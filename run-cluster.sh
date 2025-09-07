@@ -19,7 +19,7 @@ usage() {
     echo "  $0 2                                  # 2 servers, rest as clients"
     echo "  $0 2 3                               # 2 servers, 3 clients"
     echo "  $0 2 3 \"-port 8080\""
-    echo "  $0 2 3 \"-port 8080\" \"-threads 4 -duration 30s\""
+    echo "  $0 2 3 \"-port 8080\" \"-workload YCSB-A -secs 30\""
     exit 1
 }
 
@@ -43,12 +43,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOG_ROOT="${ROOT}/logs"
 
 function cluster_size() {
-    geni-get -a | \
-        grep -Po '<host name=\\".*?\"' | \
-        sed 's/<host name=\\"\(.*\)\\"/\1/' | \
-        sort | \
-        uniq | \
-        wc -l
+    /usr/local/etc/emulab/tmcc hostnames | wc -l
 }
 
 # Get available node count first to determine defaults
