@@ -1,6 +1,7 @@
 package kvs
 
 import (
+	"fmt"
 	"math"
 	"math/rand/v2"
 )
@@ -50,6 +51,146 @@ func (w *Workload) Next() WorkloadOp {
 	key := w.keygen.Uint64() % w.records
 	isRead := w.gen.Uint64() < w.readThreshold
 	return WorkloadOp{Key: key, IsRead: isRead}
+}
+
+// Transaction operation types
+type TxnOpType int
+
+const (
+	TxnGet TxnOpType = 0
+	TxnPut TxnOpType = 1
+)
+
+// Transaction types
+type TxnType int
+
+const (
+	RegularTxn      TxnType = 0
+	PaymentTxn      TxnType = 1
+	VerificationTxn TxnType = 2
+)
+
+// Single operation within a transaction
+type TxnOperation struct {
+	OpType TxnOpType
+	Key    uint64
+	Value  string // Only used for Put operations
+}
+
+// Transaction containing multiple operations
+type Transaction struct {
+	Operations []TxnOperation
+	TxnType    TxnType // Type of transaction (Regular, Payment, Verification)
+	IsPayment  bool    // If true, this is a payment transaction requiring balance checks (DEPRECATED - use TxnType)
+	Amount     uint64  // Additional metadata for specific transaction types
+}
+
+// =============================================================================
+// YCSB Transaction Workload (3-operation transactions based on YCSB patterns)
+// =============================================================================
+
+// Generate a 3-operation transaction using WorkloadOp
+func (yw *Workload) NextTransaction() Transaction {
+	ops := make([]TxnOperation, 3)
+
+	for i := 0; i < 3; i++ {
+		baseOp := yw.Next()
+
+		if baseOp.IsRead {
+			ops[i] = TxnOperation{
+				OpType: TxnGet,
+				Key:    baseOp.Key,
+			}
+		} else {
+			ops[i] = TxnOperation{
+				OpType: TxnPut,
+				Key:    baseOp.Key,
+				Value:  fmt.Sprintf("value-%d-%d", baseOp.Key, rand.Uint64()%1000),
+			}
+		}
+	}
+
+	return Transaction{
+		Operations: ops,
+		TxnType:    RegularTxn,
+		IsPayment:  false,
+	}
+}
+
+// =============================================================================
+// Payment Transaction Workload (bank account transfers)
+// =============================================================================
+
+type PaymentWorkload struct {
+	gen *Xorshift64
+}
+
+// =============================================================================
+// Verification Transaction Workload (sum verification of accounts 0-9)
+// =============================================================================
+
+type VerificationWorkload struct {
+	gen *Xorshift64
+}
+
+func NewPaymentWorkload() *PaymentWorkload {
+	return &PaymentWorkload{
+		gen: NewXorshift64(rand.Uint64()),
+	}
+}
+
+func NewVerificationWorkload() *VerificationWorkload {
+	return &VerificationWorkload{
+		gen: NewXorshift64(rand.Uint64()),
+	}
+}
+
+// Generate a payment transaction (2 accounts, transfer money)
+func (pw *PaymentWorkload) NextTransaction() Transaction {
+	fromAccount := pw.gen.Uint64() % 10
+	toAccount := pw.gen.Uint64() % 10
+
+	// Ensure we don't transfer to the same account
+	for toAccount == fromAccount {
+		toAccount = pw.gen.Uint64() % 10
+	}
+
+	// Transfer amount between $1 and $100
+	amount := (pw.gen.Uint64() % 100) + 1
+
+	ops := []TxnOperation{
+		{OpType: TxnGet, Key: fromAccount},            // Read source balance
+		{OpType: TxnGet, Key: toAccount},              // Read dest balance
+		{OpType: TxnPut, Key: fromAccount, Value: ""}, // Will be set during execution
+		{OpType: TxnPut, Key: toAccount, Value: ""},   // Will be set during execution
+	}
+
+	return Transaction{
+		Operations: ops,
+		TxnType:    PaymentTxn,
+		IsPayment:  true,
+		Amount:     amount, // Store transfer amount
+	}
+}
+
+// Generate a verification transaction that sums accounts 0-9 and expects total of 10000
+func (vw *VerificationWorkload) NextTransaction() Transaction {
+	// Create operations to read all accounts 0-9
+	ops := make([]TxnOperation, 10)
+
+	for i := 0; i < 10; i++ {
+		ops[i] = TxnOperation{
+			OpType: TxnGet,
+			Key:    uint64(i),
+		}
+	}
+
+	return Transaction{
+		Operations: ops,
+		TxnType:    VerificationTxn,
+		IsPayment:  false,    // This is a verification transaction, not a payment
+		Amount:     10000000, // Expected total sum
+	}
 }
 
 // Taken from Wikipedia.

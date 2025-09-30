@@ -155,13 +155,16 @@ make
 echo
 
 # Start servers
+# pass total server count and unique server ID (node index) to each server
+server_id=0
 for node in "${SERVER_NODES[@]}"; do
-    echo "Starting server on $node..."
-    ${SSH} $node "${ROOT}/bin/kvsserver $SERVER_ARGS > \"$LOG_DIR/kvsserver-$node.log\" 2>&1 &"
+    echo "Starting server on $node with ID $server_id..."
+    ${SSH} $node "${ROOT}/bin/kvsserver --num-servers $SERVER_COUNT --server-id $server_id $SERVER_ARGS > \"$LOG_DIR/kvsserver-$node.log\" 2>&1 &"
+    server_id=$((server_id + 1))
 done
 
 # Give servers time to start
-sleep 2
+sleep 1
 
 # Start clients with a unique marker for identification
 # Build comma-separated list of server hosts with port 8080
