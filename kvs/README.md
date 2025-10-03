@@ -215,23 +215,33 @@ We implemented three types of workloads:
 ## Reflections
 
 ### Lessons Learned
-Implementing 2PL correctly requires careful lock management (especially upgrades and read-your-own-writes).
-Debugging distributed commits highlighted the importance of detailed logging.
-Skewed workloads (θ=0.99) stressed abort handling logic.
-### Optimizations That Worked Well
-No-Wait strategy: kept concurrency control simple and deadlock-free.
-2PC separation: made correctness reasoning straightforward.
-Verification workload: effective for catching correctness bugs.
-### What didn't work 
-High abort rates under skew (hot keys).
-Per-key locks limited concurrency on popular keys.
-Batching attempts added complexity without significant gain.
-### Ideas for Further Improvement
-Adaptive retry/backoff to reduce abort storms.
-Consistent hashing for better load balance under skew.
-MVCC or lock-free designs for higher concurrency.
-Memory pooling to reduce GC overhead.
+This project highlighted the complexity of implementing **strictly serializable distributed transactions** compared to single-node key-value stores.  
+- First, we experienced the tradeoff between **correctness and performance**. By combining **two-phase locking (2PL)** with **two-phase commit (2PC)**, we ensured strict serializability across partitions. While this approach provides theoretical guarantees, it comes with substantial coordination and locking overhead.  
+- Second, we encountered the practical challenge of **deadlocks and aborts**. Even with three-operation transactions, lock contention was frequent under high concurrency. We adopted the **No-Wait strategy**, which aborts immediately when a lock cannot be acquired. This eliminated deadlocks entirely but led to significantly higher abort rates under contention.  
+- Third, we observed how **data access distribution strongly impacts performance**. With θ=0 (uniform distribution), throughput scaled reasonably well. Under θ=0.99 (high skew), however, contention on hot keys became the dominant bottleneck, leading to throughput collapse and frequent retries. This matched our expectations for Zipfian workloads and provided clear evidence of the fragility of 2PL+2PC under skewed workloads.  
+- Finally, the **Payment workload** proved to be particularly valuable. It validated the preservation of invariants such as account balance conservation and revealed correctness issues that were not apparent with synthetic YCSB transactions. Without this workload, subtle serialization violations could easily have gone unnoticed.
 
+### Optimizations That Worked Well
+Several design choices proved effective in practice:  
+1. **No-Wait strategy**: While it increased the number of aborts, its simplicity ensured the system never stalled due to deadlocks.  
+2. **Clear 2PC structure**: Separating the protocol into a Prepare phase followed by GlobalCommit/GlobalAbort aligned well with the formal model from class and simplified both reasoning and debugging.  
+3. **Account partitioning for Payment workload**: By initializing accounts using `account_id % numServers`, each server managed only its assigned accounts, avoiding duplicate initialization and ensuring data consistency.  
+4. **Verification workload**: Periodic checks that the total sum across accounts 0–9 remained $10,000,000 provided strong evidence of correctness. Even under θ=0.99 with high contention and many aborts, the invariant held, which gave us confidence in the implementation.
+
+### What didn't work 
+Not all design choices were effective:  
+1. **Lock granularity**: Our per-key locks were too coarse. Hotspot keys became severe contention points, limiting concurrency.  
+2. **Abort storms under high skew**: With θ=0.99, retries after aborts often overlapped, amplifying contention and creating “abort storms” that degraded throughput. Our retry strategy lacked backoff or adaptive control.  
+3. **Batching strategies**: Inspired by PA1, we attempted to experiment with batching to reduce RPC overhead, but with only 3–4 operations per transaction, batching added little benefit and introduced complexity.  
+4. **Serialization optimizations**: Switching encodings (e.g., Protobuf vs. Go structs) provided negligible performance improvements, as the system bottleneck was dominated by lock contention and 2PC coordination, not serialization.
+
+### Ideas for Further Improvement
+If given additional time, we would pursue the following directions:  
+1. **Adaptive retry with backoff**: Implement exponential backoff or randomized delays for retries to avoid abort storms under skewed workloads.  
+2. **Consistent hashing and hotspot mitigation**: Move beyond modulo partitioning to consistent hashing or key replication to balance load and reduce contention under Zipfian distributions.  
+3. **MVCC or lock-free approaches**: Multi-version concurrency control (MVCC) or lock-free data structures could alleviate bottlenecks from 2PL while still ensuring serializability.  
+4. **Extended verification mechanisms**: Beyond checking global account sums, introduce subset audits or temporal consistency checks to catch subtle anomalies earlier.  
+5. **Larger-scale evaluation**: Our tests were limited to 4 nodes. Scaling to larger clusters would help surface coordination bottlenecks, network latency issues, and imbalances across partitions.
 
 ### Individual Contributions
 |     Member    |                                    Contributions                                   |
