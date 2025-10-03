@@ -83,7 +83,7 @@ func NewKVServiceWithPartitioning(serverId, numServers int) *KVService {
 			accountsInitialized = append(accountsInitialized, i)
 		}
 	}
-	fmt.Printf("%v\n", accountsInitialized)
+	log.Printf("%v\n", accountsInitialized)
 
 	return kvs
 }
@@ -402,13 +402,13 @@ func (kv *KVService) Prepare(request *kvs.PrepareRequest, response *kvs.PrepareR
 
 	txnVal, exists := kv.transactions.Load(request.TxnId)
 	if !exists {
-		fmt.Printf("DEBUG SERVER: Transaction %s not found, voting NO\n", request.TxnId)
+		log.Printf("DEBUG SERVER: Transaction %s not found, voting NO\n", request.TxnId)
 		return nil // Vote NO
 	}
 	txn := txnVal.(*Transaction)
 
 	if txn.aborted.Load() {
-		fmt.Printf("DEBUG SERVER: Transaction %s already aborted, voting NO\n", request.TxnId)
+		log.Printf("DEBUG SERVER: Transaction %s already aborted, voting NO\n", request.TxnId)
 		return nil // Vote NO
 	}
 
@@ -428,7 +428,7 @@ func (kv *KVService) Prepare(request *kvs.PrepareRequest, response *kvs.PrepareR
 			currentValue := currentValueVal.(string)
 			if currentValue != "" {
 				// Key exists but has non-empty value - conflict!
-				fmt.Printf("DEBUG SERVER: Conflict on key %s (expected empty, got %s), voting NO\n", key, currentValue)
+				log.Printf("DEBUG SERVER: Conflict on key %s (expected empty, got %s), voting NO\n", key, currentValue)
 				valid = false
 				return false
 			}
@@ -438,14 +438,14 @@ func (kv *KVService) Prepare(request *kvs.PrepareRequest, response *kvs.PrepareR
 
 		// Expected value is non-empty
 		if !found {
-			fmt.Printf("DEBUG SERVER: Key %s not found in database (expected %s), voting NO\n", key, expectedValue)
+			log.Printf("DEBUG SERVER: Key %s not found in database (expected %s), voting NO\n", key, expectedValue)
 			valid = false
 			return false
 		}
 		currentValue := currentValueVal.(string)
 		if currentValue != expectedValue {
 			// Conflict detected, vote NO
-			fmt.Printf("DEBUG SERVER: Conflict detected on key %s (expected=%s, current=%s), voting NO\n", key, expectedValue, currentValue)
+			log.Printf("DEBUG SERVER: Conflict detected on key %s (expected=%s, current=%s), voting NO\n", key, expectedValue, currentValue)
 			valid = false
 			return false
 		}
@@ -461,7 +461,7 @@ func (kv *KVService) Prepare(request *kvs.PrepareRequest, response *kvs.PrepareR
 
 	// Vote YES - mark as prepared but don't commit yet
 	// CRITICAL: Keep holding locks until GlobalCommit/GlobalAbort arrives!
-	fmt.Printf("DEBUG SERVER: Transaction %s voting YES\n", request.TxnId)
+	log.Printf("DEBUG SERVER: Transaction %s voting YES\n", request.TxnId)
 	txn.prepared.Store(true)
 	response.Vote = true
 	return nil
@@ -556,7 +556,7 @@ func (kv *KVService) printStats() {
 	diffCommits := currentCommits - prevCommits
 	deltaS := now.Sub(lastPrint).Seconds()
 
-	fmt.Printf("get/s %0.2f\nput/s %0.2f\ncommit/s %0.2f\nops/s %0.2f\n\n",
+	log.Printf("get/s %0.2f\nput/s %0.2f\ncommit/s %0.2f\nops/s %0.2f\n\n",
 		float64(diffGets)/deltaS,
 		float64(diffPuts)/deltaS,
 		float64(diffCommits)/deltaS,
@@ -578,7 +578,7 @@ func main() {
 		log.Fatal("listen error:", e)
 	}
 
-	fmt.Printf("Starting KVS server on :%s\n", *port)
+	log.Printf("Starting KVS server on :%s\n", *port)
 
 	go func() {
 		for {

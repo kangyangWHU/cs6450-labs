@@ -26,29 +26,22 @@ We evaluated horizontal scalability by testing with 1, 2, and 3 servers:
 | 2 servers | 4,133 commits/s | 4,401 commits/s |
 | 3 servers | 3,655 commits/s | 3,907 commits/s |
 
-**Key Observations:**
+**Key Observations: Negative Scaling**
 
-**Negative Scaling:**
 - Adding more servers **decreases** throughput instead of increasing it
 - 1 server achieves ~40% higher throughput than 3 servers
 - This counter-intuitive result is due to distributed transaction overhead
 
-**Root Causes:**
+**Reasons for Performance Drop:**
 1. **2PC Protocol Overhead**: Every transaction requires Prepare + GlobalCommit/GlobalAbort across all participating servers, adding 2 network round-trips
 2. **Cross-Server Transactions**: With key partitioning (`key % numServers`), most YCSB-B transactions (which access 10 keys each) span multiple servers, requiring distributed coordination
 3. **Increased Coordination Cost**: More servers = more participants in 2PC = higher latency per transaction
 4. **Lock Contention Amplification**: Distributed locks held longer due to 2PC latency, reducing overall concurrency
 
-**Why This Happens:**
-- YCSB-B transactions are small (10 operations) but span many keys
-- With 3 servers, a transaction accessing keys {0,1,2,3,4,5,6,7,8,9} will hit all 3 servers (keys 0,3,6,9 → server0; 1,4,7 → server1; 2,5,8 → server2)
-- Single-server transactions avoid 2PC overhead entirely, executing locally with minimal latency
-- The 2PC coordination cost dominates the benefit of distributing data
-
 **Implications:**
 - Our system is optimized for **strong consistency** (2PL + 2PC), not raw throughput
 - For this workload pattern, a single-server system is more efficient
-- Scaling would benefit workloads with larger transactions or more localized access patterns
+- Scaling would benefit workloads with larger transactions.
 
 ### Contention Analysis
 
@@ -80,7 +73,7 @@ Load imbalance: **19:1 ratio** between node0 and node2 commit rates
 **Analysis:**
 
 **Surprisingly Small Impact:**
-- Only 6.4% performance difference between uniform and highly skewed access
+- Only 6.4% performance drop for highly skewed access
 - Much smaller than expected for θ=0.99, which concentrates most accesses on low-numbered keys
 - This differs from our initial expectations that contention would be the primary bottleneck
 
@@ -237,7 +230,7 @@ We extended the protocol with the following new RPC messages:
 - Prevents deadlocks at the cost of increased abort rate under contention
 - Simpler than wait-die or wound-wait schemes
 
-**Code Location:** `kvs/server/main.go:104-157`
+**Code Location:** `kvs/server/main.go:93`
 
 ### Two-Phase Commit Implementation
 
@@ -274,8 +267,8 @@ We extended the protocol with the following new RPC messages:
 **Code Location:**
 - Client coordinator: `kvs/client/main.go:161-295` (executeTransaction function)
 - Server Prepare: `kvs/server/main.go:394-465`
-- Server GlobalCommit: `kvs/server/main.go:467-501`
-- Server GlobalAbort: `kvs/server/main.go:503-536`
+- Server GlobalCommit: `kvs/server/main.go:471`
+- Server GlobalAbort: `kvs/server/main.go:516`
 
 ### Handling YCSB Workloads
 
@@ -576,13 +569,13 @@ Replace No-Wait with Wait-Die or Wound-Wait to reduce abort rates under high con
 
 ### Individual Contributions
 
-**[Team Member Name]**: Designed and implemented 2PL lock manager, including shared/exclusive locks and lock upgrade mechanism. Debugged read-set validation issues.
+**Kang Yang**: Designed and implemented 2PL lock manager, including shared/exclusive locks and lock upgrade mechanism. Debugged read-set validation issues.
 
-**[Team Member Name]**: Implemented 2PC protocol in client coordinator and server participant roles. Designed payment and verification workloads.
+**Chencheng Mao**: Implemented 2PC protocol in client coordinator and server participant roles. Designed payment and verification workloads.
 
-**[Team Member Name]**: Performance testing and optimization attempts (fine-grained locking, RWMutex). Conducted contention analysis with varying theta values.
+**Yujin Song**: Performance testing and optimization attempts (fine-grained locking, RWMutex). Conducted contention analysis with varying theta values.
 
-**[Team Member Name]**: Testing infrastructure, bug fixes, and documentation. Created reproducibility guide and performance visualizations.
+**Hao Ren**: Testing infrastructure, bug fixes, and documentation. Created reproducibility guide and performance visualizations.
 
 ---
 

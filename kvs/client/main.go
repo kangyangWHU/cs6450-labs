@@ -3,6 +3,8 @@ package main
 import (
 	"flag"
 	"fmt"
+
+	// "fmt"
 	"log"
 	"net/rpc"
 	"strconv"
@@ -15,10 +17,17 @@ import (
 
 type HostList []string
 
+// `String` returns a string representation of the HostList.
+// It formats the list of hosts into a human-readable string.
 func (h *HostList) String() string {
 	return strings.Join(*h, ",")
 }
 
+// Set implements flag.Value for HostList. It replaces the receiver's contents
+// with the result of strings.Split(value, ",") and always returns nil.
+// Note: elements are not trimmed and empty elements are preserved (for example,
+// "" -> []string{""} and "a,,b" -> []string{"a", "", "b"}). This method does
+// not perform hostname validation or normalization.
 func (h *HostList) Set(value string) error {
 	*h = strings.Split(value, ",")
 	return nil
@@ -119,7 +128,7 @@ func abortTransaction(dc *DistributedClient, participants []int, txnIds map[int]
 	for _, pServerId := range participants {
 		dc.clients[pServerId].GlobalAbort(txnIds[pServerId])
 	}
-	fmt.Printf("TRANSACTION FAILED (%s): %s\n", reason, txnDesc)
+	log.Printf("TRANSACTION FAILED (%s): %s\n", reason, txnDesc)
 	return false
 }
 
@@ -153,7 +162,7 @@ func formatTransaction(txn kvs.Transaction) string {
 func executeTransaction(dc *DistributedClient, txn kvs.Transaction) bool {
 	// Log transaction start
 	txnDesc := formatTransaction(txn)
-	fmt.Printf("TRANSACTION START: %s\n", txnDesc)
+	log.Printf("TRANSACTION START: %s\n", txnDesc)
 
 	// Determine all servers involved in this transaction
 	participantIds := make(map[int]bool)
@@ -180,10 +189,10 @@ func executeTransaction(dc *DistributedClient, txn kvs.Transaction) bool {
 
 	// Execute operations - unified loop for all transaction types
 	readValues := make(map[uint64]string) // Store read values for validation
-
 	for _, op := range txn.Operations {
 		// Determine which server handles this key
-		key_str := fmt.Sprintf("%d", op.Key)
+		// key_str := fmt.Sprintf("%d", op.Key)
+		key_str := strconv.FormatUint(op.Key, 10)
 		serverId := int(op.Key) % dc.numServers
 		client := dc.clients[serverId]
 		txnId := txnIds[serverId]
@@ -253,10 +262,10 @@ func executeTransaction(dc *DistributedClient, txn kvs.Transaction) bool {
 		}
 
 		if totalSum != txn.Amount {
-			fmt.Printf("VERIFICATION FAILED: Expected sum %d, but got %d\n", txn.Amount, totalSum)
+			log.Printf("VERIFICATION FAILED: Expected sum %d, but got %d\n", txn.Amount, totalSum)
 		} else {
 			// Verification succeeded - print account balances
-			fmt.Printf("VERIFICATION SUCCESS: Total=%d, Balances=%v\n", totalSum, accountBalances)
+			log.Printf("VERIFICATION SUCCESS: Total=%d, Balances=%v\n", totalSum, accountBalances)
 		}
 	}
 
@@ -283,7 +292,7 @@ func executeTransaction(dc *DistributedClient, txn kvs.Transaction) bool {
 			isLeader := (serverId == leader)
 			dc.clients[serverId].GlobalCommit(txnIds[serverId], isLeader)
 		}
-		fmt.Printf("TRANSACTION SUCCESS: %s\n", txnDesc)
+		log.Printf("TRANSACTION SUCCESS: %s\n", txnDesc)
 		return true
 	} else {
 		return abortTransaction(dc, participants, txnIds, txnDesc, "2PC_VOTE_NO")
@@ -331,7 +340,7 @@ func main() {
 		hosts = append(hosts, "localhost:8080")
 	}
 
-	fmt.Printf("hosts %v\ntheta %.2f\nworkload %s\nsecs %d\nclients %d\n",
+	log.Printf("hosts %v\ntheta %.2f\nworkload %s\nsecs %d\nclients %d\n",
 		hosts, *theta, *workload, *secs, *numClients)
 
 	done := atomic.Bool{}
