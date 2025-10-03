@@ -579,7 +579,7 @@ Replace No-Wait with Wait-Die or Wound-Wait to reduce abort rates under high con
 
 ---
 
-## Appendix: Performance Data
+<!-- ## Appendix: Performance Data
 
 ### Raw Performance Numbers
 
@@ -616,4 +616,4 @@ VERIFICATION SUCCESS: Total=10000000, Balances=[999276 999770 1001220 1000647 99
 VERIFICATION SUCCESS: Total=10000000, Balances=[1000523 999234 1000156 1000012 999876 1000234 999567 1000123 999891 1000384]
 ```
 
-All verifications maintain the invariant: sum of balances = $10,000,000.
+All verifications maintain the invariant: sum of balances = $10,000,000. -->
