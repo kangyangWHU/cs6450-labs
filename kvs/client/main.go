@@ -324,7 +324,7 @@ func main() {
 	theta := flag.Float64("theta", 0.99, "Zipfian distribution skew parameter")
 	workload := flag.String("workload", "XFER", "Workload type (YCSB-A, YCSB-B, YCSB-C, XFER, VERIFY)")
 	secs := flag.Int("secs", 30, "Duration in seconds for each client to run")
-	numClients := 10
+	numClients := flag.Int("clients", 10, "Number of concurrent client goroutines")
 	flag.Parse()
 
 	if len(hosts) == 0 {
@@ -332,11 +332,11 @@ func main() {
 	}
 
 	fmt.Printf("hosts %v\ntheta %.2f\nworkload %s\nsecs %d\nclients %d\n",
-		hosts, *theta, *workload, *secs, numClients)
+		hosts, *theta, *workload, *secs, *numClients)
 
 	done := atomic.Bool{}
 
-	for clientId := 0; clientId < numClients; clientId++ {
+	for clientId := 0; clientId < *numClients; clientId++ {
 		go func(clientId int) {
 			var txnWorkload TransactionWorkload
 			if *workload == "XFER" {
