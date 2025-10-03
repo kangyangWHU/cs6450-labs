@@ -79,10 +79,11 @@ type TxnOperation struct {
 
 // Transaction containing multiple operations
 type Transaction struct {
-	Operations []TxnOperation
-	TxnType    TxnType // Type of transaction (Regular, Payment, Verification)
-	IsPayment  bool    // If true, this is a payment transaction requiring balance checks (DEPRECATED - use TxnType)
-	Amount     uint64  // Additional metadata for specific transaction types
+	Operations      []TxnOperation
+	TxnType         TxnType // Type of transaction (Regular, Payment, Verification)
+	IsPayment       bool    // If true, this is a payment transaction requiring balance checks (DEPRECATED - use TxnType)
+	Amount          uint64  // Additional metadata for specific transaction types
+	AccountBalances []uint64 // Used by verification transactions to store account balances
 }
 
 // =============================================================================

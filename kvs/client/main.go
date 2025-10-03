@@ -238,10 +238,12 @@ func executeTransaction(dc *DistributedClient, txn kvs.Transaction) bool {
 	// Post-execution validation for verification transactions
 	if txn.TxnType == kvs.VerificationTxn {
 		var totalSum uint64 = 0
+		accountBalances := make([]uint64, 10)
 		for i := uint64(0); i < 10; i++ {
 			if value, exists := readValues[i]; exists {
 				if balance, err := strconv.ParseUint(value, 10, 64); err == nil {
 					totalSum += balance
+					accountBalances[i] = balance
 				} else {
 					return abortTransaction(dc, participants, txnIds, txnDesc, "VERIFICATION_INVALID_BALANCE")
 				}
@@ -252,6 +254,9 @@ func executeTransaction(dc *DistributedClient, txn kvs.Transaction) bool {
 
 		if totalSum != txn.Amount {
 			fmt.Printf("VERIFICATION FAILED: Expected sum %d, but got %d\n", txn.Amount, totalSum)
+		} else {
+			// Verification succeeded - print account balances
+			fmt.Printf("VERIFICATION SUCCESS: Total=%d, Balances=%v\n", totalSum, accountBalances)
 		}
 	}
 
