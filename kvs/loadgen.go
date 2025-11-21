@@ -6,6 +6,11 @@ import (
 	"math/rand/v2"
 )
 
+// TransactionWorkload interface for generating transactions
+type TransactionWorkload interface {
+	NextTransaction() Transaction
+}
+
 type Workload struct {
 	records       uint64            // Number of records in the key-value store.
 	recordSize    uint64            // Size of each record in bytes.

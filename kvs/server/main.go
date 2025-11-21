@@ -567,25 +567,41 @@ func main() {
 	port := flag.String("port", "8080", "Port to run the server on")
 	serverId := flag.Int("server-id", 0, "Server ID for account partitioning (0-based)")
 	numServers := flag.Int("num-servers", 1, "Total number of servers in the cluster")
+	useOCC := flag.Bool("occ", false, "Use OCC instead of 2PL")
 	flag.Parse()
-
-	kvs := NewKVServiceWithPartitioning(*serverId, *numServers)
-	rpc.Register(kvs)
-	rpc.HandleHTTP()
 
 	l, e := net.Listen("tcp", fmt.Sprintf(":%v", *port))
 	if e != nil {
 		log.Fatal("listen error:", e)
 	}
 
-	log.Printf("Starting KVS server on :%s\n", *port)
+	if *useOCC {
+		// Start OCC server
+		occKvs := NewOCCKVServiceWithPartitioning(*serverId, *numServers)
+		rpc.Register(occKvs)
+		rpc.HandleHTTP()
+		log.Printf("Starting OCC KVS server on :%s\n", *port)
 
-	go func() {
-		for {
-			kvs.printStats()
-			time.Sleep(1 * time.Second)
-		}
-	}()
+		go func() {
+			for {
+				occKvs.printStats()
+				time.Sleep(1 * time.Second)
+			}
+		}()
+	} else {
+		// Start 2PL server (original)
+		kvs := NewKVServiceWithPartitioning(*serverId, *numServers)
+		rpc.Register(kvs)
+		rpc.HandleHTTP()
+		log.Printf("Starting 2PL KVS server on :%s\n", *port)
+
+		go func() {
+			for {
+				kvs.printStats()
+				time.Sleep(1 * time.Second)
+			}
+		}()
+	}
 
 	http.Serve(l, nil)
 }

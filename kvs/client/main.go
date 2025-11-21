@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/rstutsman/cs6450-labs/kvs"
+	"github.com/rstutsman/cs6450-labs/kvs/cache"
 )
 
 type HostList []string
@@ -33,11 +34,6 @@ func (h *HostList) Set(value string) error {
 	return nil
 }
 
-// Transaction workload interface
-type TransactionWorkload interface {
-	NextTransaction() kvs.Transaction
-}
-
 type Client struct {
 	rpcClient *rpc.Client
 }
@@ -47,7 +43,7 @@ type DistributedClient struct {
 	numServers int
 }
 
-func Dial(addr string) *Client {
+func NewClient(addr string) *Client {
 	rpcClient, err := rpc.DialHTTP("tcp", addr)
 	if err != nil {
 		log.Fatal(err)
@@ -58,7 +54,7 @@ func Dial(addr string) *Client {
 func NewDistributedClient(hosts []string) *DistributedClient {
 	clients := make([]*Client, len(hosts))
 	for i, host := range hosts {
-		clients[i] = Dial(host)
+		clients[i] = NewClient(host)
 	}
 	return &DistributedClient{
 		clients:    clients,
@@ -300,7 +296,7 @@ func executeTransaction(dc *DistributedClient, txn kvs.Transaction) bool {
 }
 
 // Unified transaction client with retry logic
-func runTransactionClient(hosts []string, done *atomic.Bool, workload TransactionWorkload, sleep time.Duration) {
+func runTransactionClient(hosts []string, done *atomic.Bool, workload kvs.TransactionWorkload, sleep time.Duration) {
 	dc := NewDistributedClient(hosts)
 
 	for !done.Load() {
@@ -314,7 +310,7 @@ func runTransactionClient(hosts []string, done *atomic.Bool, workload Transactio
 		}
 
 		// Execute transaction with retry logic
-		for attempt := 0; ; attempt++ {
+		for attempt := 0; !done.Load(); attempt++ {
 			if executeTransaction(dc, txn) {
 				break
 			}
@@ -334,33 +330,104 @@ func main() {
 	workload := flag.String("workload", "XFER", "Workload type (YCSB-A, YCSB-B, YCSB-C, XFER, VERIFY)")
 	secs := flag.Int("secs", 30, "Duration in seconds for each client to run")
 	numClients := flag.Int("clients", 10, "Number of concurrent client goroutines")
+	useOCC := flag.Bool("occ", false, "Use OCC instead of 2PL")
+	cacheStrategy := flag.String("cache-strategy", "discard-on-abort", "Cache strategy: discard-on-abort, proactive-invalidation, ttl-reuse")
+	ttl := flag.Duration("ttl", 100*time.Millisecond, "TTL for ttl-reuse strategy")
 	flag.Parse()
 
 	if len(hosts) == 0 {
 		hosts = append(hosts, "localhost:8080")
 	}
 
-	log.Printf("hosts %v\ntheta %.2f\nworkload %s\nsecs %d\nclients %d\n",
-		hosts, *theta, *workload, *secs, *numClients)
+	log.Printf("hosts %v\ntheta %.2f\nworkload %s\nsecs %d\nclients %d\nocc %v\ncache-strategy %s\nttl %v\n",
+		hosts, *theta, *workload, *secs, *numClients, *useOCC, *cacheStrategy, *ttl)
 
 	done := atomic.Bool{}
 
-	for clientId := 0; clientId < *numClients; clientId++ {
-		go func(clientId int) {
-			var txnWorkload TransactionWorkload
-			if *workload == "XFER" {
-				txnWorkload = kvs.NewPaymentWorkload()
-			} else {
-				txnWorkload = kvs.NewWorkload(*workload, *theta)
-			}
-			runTransactionClient(hosts, &done, txnWorkload, 0)
-		}(clientId)
+	if *useOCC {
+		// Create cache strategy based on flag
+		var strategy cache.CacheStrategy
+		switch *cacheStrategy {
+		case "discard-on-abort":
+			strategy = cache.NewDiscardOnAbortStrategy()
+			log.Printf("Using Discard-on-Abort cache strategy\n")
+		case "proactive-invalidation":
+			strategy = cache.NewProactiveInvalidationStrategy()
+			log.Printf("Using Proactive Invalidation cache strategy\n")
+		case "ttl-reuse":
+			strategy = cache.NewTTLReuseStrategy(*ttl)
+			log.Printf("Using TTL Reuse cache strategy (TTL=%v)\n", *ttl)
+		default:
+			log.Fatalf("Unknown cache strategy: %s\n", *cacheStrategy)
+		}
+
+		// Start invalidation RPC server for proactive invalidation
+		var callbackHost string
+		if *cacheStrategy == "proactive-invalidation" {
+			callbackHost = startInvalidationServer(strategy)
+			log.Printf("Started invalidation RPC server on %s\n", callbackHost)
+		}
+
+		// Start OCC clients
+		for clientId := 0; clientId < *numClients; clientId++ {
+			go func(clientId int) {
+				var txnWorkload kvs.TransactionWorkload
+				if *workload == "XFER" {
+					txnWorkload = kvs.NewPaymentWorkload()
+				} else {
+					txnWorkload = kvs.NewWorkload(*workload, *theta)
+				}
+				runOCCTransactionClient(hosts, &done, txnWorkload, 0, fmt.Sprintf("client-%d", clientId), strategy, callbackHost)
+			}(clientId)
+		}
+
+	} else {
+		// Start 2PL clients (original)
+		for clientId := 0; clientId < *numClients; clientId++ {
+			go func(clientId int) {
+				var txnWorkload kvs.TransactionWorkload
+				if *workload == "XFER" {
+					txnWorkload = kvs.NewPaymentWorkload()
+				} else {
+					txnWorkload = kvs.NewWorkload(*workload, *theta)
+				}
+				runTransactionClient(hosts, &done, txnWorkload, 0)
+			}(clientId)
+		}
+
+		// Start periodic verification if enabled or if workload is XFER
+		if *workload == "XFER" {
+			go runTransactionClient(hosts, &done, kvs.NewVerificationWorkload(), time.Second*1)
+		}
 	}
 
-	// Start periodic verification if enabled or if workload is XFER (automatically verify payments)
-	if *workload == "XFER" {
-		go runTransactionClient(hosts, &done, kvs.NewVerificationWorkload(), time.Second*1)
-	}
 	time.Sleep(time.Duration(*secs) * time.Second)
 	done.Store(true)
+
+	if *useOCC && *workload == "XFER" {
+		// All payment clients stopped
+		log.Printf("Stopping payment clients, waiting for them to finish...\n")
+		time.Sleep(time.Second * 5) // Wait longer for all goroutines to fully exit retry loops
+		log.Printf("All payment clients stopped\n")
+
+		log.Printf("Starting final verification transaction\n")
+		txnWorkload := kvs.NewVerificationWorkload()
+		strategy := cache.NewDiscardOnAbortStrategy()
+
+		// Single synchronous verification transaction with retry
+		dc := NewOCCDistributedClient(hosts, "verifier-client", strategy, "")
+		txn := txnWorkload.NextTransaction()
+
+		// Retry verification until success or timeout (10 seconds)
+		startTime := time.Now()
+		maxRetries := 100
+		for attempt := 0; attempt < maxRetries && time.Since(startTime) < 10*time.Second; attempt++ {
+			if executeOCCTransaction(dc, txn) {
+				log.Printf("Final verification succeeded after %d attempts\n", attempt+1)
+				break
+			}
+			// Exponential backoff
+			time.Sleep(time.Millisecond * time.Duration(10+attempt*10))
+		}
+	}
 }
