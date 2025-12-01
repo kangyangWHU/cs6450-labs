@@ -7,10 +7,19 @@ import (
 	"net/http"
 	"net/rpc"
 	"strconv"
+	"sync/atomic"
 	"time"
 
 	"github.com/rstutsman/cs6450-labs/kvs"
 	"github.com/rstutsman/cs6450-labs/kvs/cache"
+)
+
+// Global OCC metrics
+var (
+	occCommits  atomic.Uint64
+	occAborts   atomic.Uint64
+	cacheHits   atomic.Uint64
+	cacheMisses atomic.Uint64
 )
 
 // OCCClient wraps RPC client with OCC-specific operations and cache
@@ -37,7 +46,7 @@ type OCCClientInvalidationService struct {
 // ReceiveInvalidation handles invalidation RPC from server
 func (s *OCCClientInvalidationService) ReceiveInvalidation(request *kvs.InvalidationRequest, response *kvs.InvalidationResponse) error {
 	if proactiveStrategy, ok := s.strategy.(*cache.ProactiveInvalidationStrategy); ok {
-		proactiveStrategy.OnInvalidate(request.Key, request.Version)
+		proactiveStrategy.OnInvalidate(request.Key, request.Value, request.Version)
 	}
 	return nil
 }
@@ -88,10 +97,12 @@ func (client *OCCClient) OCCBegin() string {
 func (client *OCCClient) OCCTxnGet(txnId string, key string) (string, uint64, bool) {
 	// Try cache first
 	if cachedEntry, found := client.cacheStrategy.OnRead(key); found {
+		cacheHits.Add(1)
 		return cachedEntry.Value, cachedEntry.Version, true
 	}
 
 	// Cache miss - fetch from server
+	cacheMisses.Add(1)
 	request := kvs.OCCTxnGetRequest{
 		TxnId:    txnId,
 		Key:      key,
@@ -367,6 +378,7 @@ func executeOCCTransaction(dc *OCCDistributedClient, txn kvs.Transaction) bool {
 		}
 
 		dc.cacheStrategy.OnCommit(localReadCache, localWriteCache)
+		occCommits.Add(1)
 		// Post-commit verification for verification transactions
 		log.Printf("DEBUG: txn.TxnType = %d, VerificationTxn = %d", txn.TxnType, kvs.VerificationTxn)
 		if txn.TxnType == kvs.VerificationTxn {
@@ -383,9 +395,9 @@ func executeOCCTransaction(dc *OCCDistributedClient, txn kvs.Transaction) bool {
 			}
 
 			if totalSum != txn.Amount {
-				log.Printf("VERIFICATION FAILED: Expected %d, got %d\n", txn.Amount, totalSum)
+				fmt.Printf("VERIFICATION FAILED: Expected %d, got %d\n", txn.Amount, totalSum)
 			} else {
-				log.Printf("VERIFICATION SUCCESS: Total=%d, Balances=%v\n", totalSum, accountBalances)
+				fmt.Printf("VERIFICATION SUCCESS: Total=%d, Balances=%v\n", totalSum, accountBalances)
 			}
 		}
 
@@ -402,6 +414,7 @@ func executeOCCTransaction(dc *OCCDistributedClient, txn kvs.Transaction) bool {
 			)
 		}
 		dc.cacheStrategy.OnAbort(localReadCache, localWriteCache)
+		occAborts.Add(1)
 		log.Printf("OCC TRANSACTION FAILED (VALIDATION_FAILED): %s\n", txnDesc)
 		return false
 	}

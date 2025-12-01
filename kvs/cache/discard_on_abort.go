@@ -73,7 +73,7 @@ func (s *DiscardOnAbortStrategy) OnAbort(readSet map[string]*CacheEntry, writeSe
 }
 
 // OnInvalidate is not used by this strategy
-func (s *DiscardOnAbortStrategy) OnInvalidate(key string, version uint64) {
+func (s *DiscardOnAbortStrategy) OnInvalidate(key string, value string, version uint64) {
 	// No-op: This strategy doesn't support proactive invalidation
 }
 

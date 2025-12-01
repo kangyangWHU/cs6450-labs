@@ -103,11 +103,9 @@ func (kv *OCCKVService) OCCTxnGet(request *kvs.OCCTxnGetRequest, response *kvs.O
 
 	// Track that this client has cached this key (for proactive invalidation)
 	if request.ClientId != "" {
-		kv.globalMu.Lock()
 		clientSetVal, _ := kv.cacheTracking.LoadOrStore(request.Key, &sync.Map{})
 		clientSet := clientSetVal.(*sync.Map)
 		clientSet.Store(request.ClientId, true)
-		kv.globalMu.Unlock()
 	}
 
 	// Read current value and version (no lock needed for reads)
@@ -137,14 +135,10 @@ func (kv *OCCKVService) OCCTxnPut(request *kvs.OCCTxnPutRequest, response *kvs.O
 // OCCPrepare validates transaction using OCC forward validation
 // This is Phase 1 of 2PC - validate and prepare to commit
 func (kv *OCCKVService) OCCPrepare(request *kvs.OCCValidateRequest, response *kvs.OCCValidateResponse) error {
-	// Single global lock for validation and prepare (OCC critical section)
-	kv.globalMu.Lock()
-	defer kv.globalMu.Unlock()
-
 	response.TxnId = request.TxnId
 	response.Success = false
 
-	// Build local write set map for efficient lookup
+	// Build local write set map for efficient lookup (outside lock)
 	localWriteSetKeys := make(map[string]bool)
 	for _, writeItem := range request.WriteSet {
 		localWriteSetKeys[writeItem.Key] = true
@@ -154,12 +148,16 @@ func (kv *OCCKVService) OCCPrepare(request *kvs.OCCValidateRequest, response *kv
 	// 1. For each read key: check it's not in global write set AND version matches
 	// 2. For each write key: check it's not in global write set AND not in global read set
 
+	// CRITICAL SECTION START: Only lock during validation checks and global set updates
+	kv.globalMu.Lock()
+
 	// Validate read set (including keys also written later). We must still
 	// ensure versions match for read-write keys to avoid lost updates that
 	// would break invariants like total balance conservation.
 	for _, readItem := range request.ReadSet {
 		// Check if key is in global write set (another txn is writing to it)
 		if writerTxn, found := kv.globalWriteSet.Load(readItem.Key); found {
+			kv.globalMu.Unlock()
 			log.Printf("OCC Validation failed for txn %s: read key %s is in global write set (writer: %s)\n",
 				request.TxnId, readItem.Key, writerTxn.(string))
 			return nil
@@ -172,6 +170,7 @@ func (kv *OCCKVService) OCCPrepare(request *kvs.OCCValidateRequest, response *kv
 			if found {
 				currentEntry := currentVal.(*VersionedEntry)
 				if currentEntry.Value != "" || currentEntry.Version != 0 {
+					kv.globalMu.Unlock()
 					log.Printf("OCC Validation failed for txn %s: read key %s changed (expected empty, got v%d)\n",
 						request.TxnId, readItem.Key, currentEntry.Version)
 					return nil
@@ -180,12 +179,14 @@ func (kv *OCCKVService) OCCPrepare(request *kvs.OCCValidateRequest, response *kv
 		} else {
 			// Expected specific version
 			if !found {
+				kv.globalMu.Unlock()
 				log.Printf("OCC Validation failed for txn %s: read key %s not found (expected v%d)\n",
 					request.TxnId, readItem.Key, readItem.Version)
 				return nil
 			}
 			currentEntry := currentVal.(*VersionedEntry)
 			if currentEntry.Version != readItem.Version {
+				kv.globalMu.Unlock()
 				log.Printf("OCC Validation failed for txn %s: read key %s version mismatch (expected v%d, got v%d)\n",
 					request.TxnId, readItem.Key, readItem.Version, currentEntry.Version)
 				return nil
@@ -197,6 +198,7 @@ func (kv *OCCKVService) OCCPrepare(request *kvs.OCCValidateRequest, response *kv
 	for _, writeItem := range request.WriteSet {
 		// Check if key is in global write set (write-write conflict)
 		if writerTxn, found := kv.globalWriteSet.Load(writeItem.Key); found {
+			kv.globalMu.Unlock()
 			log.Printf("OCC Validation failed for txn %s: write key %s is in global write set (writer: %s)\n",
 				request.TxnId, writeItem.Key, writerTxn.(string))
 			return nil
@@ -206,6 +208,7 @@ func (kv *OCCKVService) OCCPrepare(request *kvs.OCCValidateRequest, response *kv
 		if readerSetVal, found := kv.globalReadSet.Load(writeItem.Key); found {
 			readerSet := readerSetVal.(map[string]bool)
 			if len(readerSet) > 0 {
+				kv.globalMu.Unlock()
 				log.Printf("OCC Validation failed for txn %s: write key %s is in global read set (%d readers)\n",
 					request.TxnId, writeItem.Key, len(readerSet))
 				return nil
@@ -237,6 +240,36 @@ func (kv *OCCKVService) OCCPrepare(request *kvs.OCCValidateRequest, response *kv
 
 	kv.transactions.Store(request.TxnId, txn)
 
+	// CRITICAL SECTION END
+	kv.globalMu.Unlock()
+
+	// OPTION 1: Send early invalidations in Prepare phase (AGGRESSIVE)
+	// Push immediately after validation passes (outside lock - async network I/O)
+	// Pros: Fastest propagation, lowest commit latency
+	// Cons: Pushes uncommitted data, clients see speculative values if abort
+
+	for _, writeItem := range request.WriteSet {
+		currentVal, found := kv.store.Load(writeItem.Key)
+		var futureVersion uint64
+		if found {
+			currentEntry := currentVal.(*VersionedEntry)
+			futureVersion = currentEntry.Version + 1
+		} else {
+			futureVersion = 1
+		}
+		kv.sendInvalidations(writeItem.Key, writeItem.Value, futureVersion)
+	}
+
+	// OPTION 2: Send invalidation SIGNAL only (SAFE)
+	// Tell clients to invalidate cache but don't push value yet
+	// Value will be pushed in Commit phase
+	// Uncomment to enable safe early invalidation
+	/*
+		for _, writeItem := range request.WriteSet {
+			kv.sendInvalidationSignal(writeItem.Key)
+		}
+	*/
+
 	response.Success = true
 	return nil
 }
@@ -244,10 +277,6 @@ func (kv *OCCKVService) OCCPrepare(request *kvs.OCCValidateRequest, response *kv
 // OCCCommit commits a prepared transaction (Phase 2 of 2PC)
 // Apply writes atomically and clean up global read/write sets
 func (kv *OCCKVService) OCCCommit(request *kvs.OCCValidateRequest, response *kvs.OCCValidateResponse) error {
-	// Single global lock for write phase
-	kv.globalMu.Lock()
-	defer kv.globalMu.Unlock()
-
 	response.TxnId = request.TxnId
 	response.Success = false
 
@@ -258,6 +287,9 @@ func (kv *OCCKVService) OCCCommit(request *kvs.OCCValidateRequest, response *kvs
 	}
 
 	txn := txnVal.(*OCCTransaction)
+
+	// CRITICAL SECTION START: Only lock during store updates and global set cleanup
+	kv.globalMu.Lock()
 
 	// Apply all writes with incremented versions
 	for key, value := range txn.writeSet {
@@ -276,9 +308,6 @@ func (kv *OCCKVService) OCCCommit(request *kvs.OCCValidateRequest, response *kvs
 			Version: newVersion,
 		})
 
-		// Proactive invalidation: notify clients who cached this key
-		kv.sendInvalidations(key, newVersion)
-
 		// Remove from global write set
 		kv.globalWriteSet.Delete(key)
 	}
@@ -296,6 +325,9 @@ func (kv *OCCKVService) OCCCommit(request *kvs.OCCValidateRequest, response *kvs
 		}
 	}
 
+	// CRITICAL SECTION END
+	kv.globalMu.Unlock()
+
 	response.Success = true
 
 	// Count commits only on coordinator to avoid double counting
@@ -304,14 +336,20 @@ func (kv *OCCKVService) OCCCommit(request *kvs.OCCValidateRequest, response *kvs
 	}
 
 	kv.transactions.Delete(request.TxnId)
+
+	// Proactive invalidation: push new value to clients (outside lock - async network I/O)
+	// Uncomment if not sending in Prepare phase
+	// for key, value := range txn.writeSet {
+	// 	currentVal, _ := kv.store.Load(key)
+	// 	entry := currentVal.(*VersionedEntry)
+	// 	kv.sendInvalidations(key, value, entry.Version)
+	// }
+
 	return nil
 }
 
 // OCCAbortPrepared aborts a prepared transaction
 func (kv *OCCKVService) OCCAbortPrepared(request *kvs.OCCValidateRequest, response *kvs.OCCValidateResponse) error {
-	kv.globalMu.Lock()
-	defer kv.globalMu.Unlock()
-
 	response.TxnId = request.TxnId
 	response.Success = true
 
@@ -321,6 +359,9 @@ func (kv *OCCKVService) OCCAbortPrepared(request *kvs.OCCValidateRequest, respon
 	}
 
 	txn := txnVal.(*OCCTransaction)
+
+	// CRITICAL SECTION START: Only lock during global set cleanup
+	kv.globalMu.Lock()
 
 	// Remove from global write set
 	for key := range txn.writeSet {
@@ -340,17 +381,35 @@ func (kv *OCCKVService) OCCAbortPrepared(request *kvs.OCCValidateRequest, respon
 		}
 	}
 
-	// Remove transaction from tracking
+	// CRITICAL SECTION END
+	kv.globalMu.Unlock()
+
+	// Remove transaction from tracking (outside lock)
 	kv.transactions.Delete(request.TxnId)
+
+	// If we sent speculative invalidations in Prepare phase, we need to "undo" them
+	// Send the CURRENT (correct) values back to clients (outside lock - async network I/O)
+	for key := range txn.writeSet {
+		// Get the actual current value (not the aborted write)
+		if currentVal, found := kv.store.Load(key); found {
+			entry := currentVal.(*VersionedEntry)
+			// Push the correct current value to fix any speculative updates
+			kv.sendInvalidations(key, entry.Value, entry.Version)
+		} else {
+			// Key doesn't exist - send invalidation signal to clear any cached data
+			kv.sendInvalidationSignal(key)
+		}
+	}
+
 	return nil
 }
 
-// sendInvalidations notifies clients about updated keys (for proactive invalidation)
-func (kv *OCCKVService) sendInvalidations(key string, newVersion uint64) {
+// sendInvalidations proactively pushes new value to clients (true proactive invalidation)
+func (kv *OCCKVService) sendInvalidations(key string, value string, newVersion uint64) {
 	if clientSetVal, found := kv.cacheTracking.Load(key); found {
 		clientSet := clientSetVal.(*sync.Map)
 
-		// Send invalidation to each client that cached this key
+		// Push new value to each client that cached this key
 		clientSet.Range(func(clientIdVal, _ interface{}) bool {
 			clientId := clientIdVal.(string)
 
@@ -358,12 +417,12 @@ func (kv *OCCKVService) sendInvalidations(key string, newVersion uint64) {
 			if hostVal, found := kv.clientConnections.Load(clientId); found {
 				host := hostVal.(string)
 
-				// Send invalidation RPC to client (best-effort, don't block on failure)
-				go func(cid, h string) {
-					if err := sendClientInvalidation(h, key, newVersion); err != nil {
+				// Send invalidation RPC with new value to client (best-effort, don't block on failure)
+				go func(cid, h, v string, ver uint64) {
+					if err := sendClientInvalidation(h, key, v, ver); err != nil {
 						log.Printf("Failed to send invalidation to client %s: %v\n", cid, err)
 					}
-				}(clientId, host)
+				}(clientId, host, value, newVersion)
 			}
 
 			return true
@@ -374,8 +433,38 @@ func (kv *OCCKVService) sendInvalidations(key string, newVersion uint64) {
 	}
 }
 
-// sendClientInvalidation sends an invalidation RPC to a client
-func sendClientInvalidation(clientHost string, key string, version uint64) error {
+// sendInvalidationSignal tells clients to invalidate cache without pushing new value
+// Safer than sendInvalidations for Prepare phase - clients delete stale data but
+// must fetch fresh data from server (which will have the new value after Commit)
+func (kv *OCCKVService) sendInvalidationSignal(key string) {
+	if clientSetVal, found := kv.cacheTracking.Load(key); found {
+		clientSet := clientSetVal.(*sync.Map)
+
+		// Tell clients to invalidate (delete) cached entry
+		clientSet.Range(func(clientIdVal, _ interface{}) bool {
+			clientId := clientIdVal.(string)
+
+			if hostVal, found := kv.clientConnections.Load(clientId); found {
+				host := hostVal.(string)
+
+				// Send invalidation signal (version=0, empty value means "delete cache")
+				go func(cid, h string) {
+					if err := sendClientInvalidation(h, key, "", 0); err != nil {
+						log.Printf("Failed to send invalidation signal to client %s: %v\n", cid, err)
+					}
+				}(clientId, host)
+			}
+
+			return true
+		})
+
+		// Keep tracking - will send full update in Commit phase
+		// Don't delete: kv.cacheTracking.Delete(key)
+	}
+}
+
+// sendClientInvalidation sends an invalidation RPC to a client with new value
+func sendClientInvalidation(clientHost string, key string, value string, version uint64) error {
 	// Try to connect to client RPC server
 	client, err := rpc.DialHTTP("tcp", clientHost)
 	if err != nil {
@@ -385,6 +474,7 @@ func sendClientInvalidation(clientHost string, key string, version uint64) error
 
 	request := &kvs.InvalidationRequest{
 		Key:     key,
+		Value:   value,
 		Version: version,
 	}
 	response := &kvs.InvalidationResponse{}
@@ -394,12 +484,12 @@ func sendClientInvalidation(clientHost string, key string, version uint64) error
 	return err
 }
 
-// OCCAbort aborts an OCC transaction (called before prepare phase)
-func (kv *OCCKVService) OCCAbort(request *kvs.AbortRequest, response *kvs.AbortResponse) error {
-	// Simply remove transaction from tracking
-	kv.transactions.Delete(request.TxnId)
-	return nil
-}
+// // OCCAbort aborts an OCC transaction (called before prepare phase)
+// func (kv *OCCKVService) OCCAbort(request *kvs.AbortRequest, response *kvs.AbortResponse) error {
+// 	// Simply remove transaction from tracking
+// 	kv.transactions.Delete(request.TxnId)
+// 	return nil
+// }
 
 func (kv *OCCKVService) printStats() {
 	kv.printMutex.Lock()
@@ -426,7 +516,8 @@ func (kv *OCCKVService) printStats() {
 	diffCommits := currentCommits - prevCommits
 	deltaS := now.Sub(lastPrint).Seconds()
 
-	log.Printf("OCC: get/s %0.2f | put/s %0.2f | commit/s %0.2f | ops/s %0.2f\n",
+	// Always print stats regardless of verbose setting
+	statsLogger.Printf("get/s %0.2f\nput/s %0.2f\ncommit/s %0.2f\nops/s %0.2f\n\n",
 		float64(diffGets)/deltaS,
 		float64(diffPuts)/deltaS,
 		float64(diffCommits)/deltaS,

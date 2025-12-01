@@ -3,10 +3,12 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
 	"net/rpc"
+	"os"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -20,6 +22,14 @@ type Stats struct {
 	gets    atomic.Uint64
 	commits atomic.Uint64
 }
+
+// verbose is controlled via the -verbose flag in main and
+// affects whether non-essential logs are emitted. Stats are
+// always printed regardless of this flag.
+var verbose bool
+
+// statsLogger always prints to stderr, regardless of verbose flag
+var statsLogger = log.New(os.Stderr, "", log.LstdFlags)
 
 // Lock types for 2PL
 type LockType int
@@ -556,7 +566,8 @@ func (kv *KVService) printStats() {
 	diffCommits := currentCommits - prevCommits
 	deltaS := now.Sub(lastPrint).Seconds()
 
-	log.Printf("get/s %0.2f\nput/s %0.2f\ncommit/s %0.2f\nops/s %0.2f\n\n",
+	// Always print stats regardless of verbose setting
+	statsLogger.Printf("get/s %0.2f\nput/s %0.2f\ncommit/s %0.2f\nops/s %0.2f\n\n",
 		float64(diffGets)/deltaS,
 		float64(diffPuts)/deltaS,
 		float64(diffCommits)/deltaS,
@@ -568,7 +579,14 @@ func main() {
 	serverId := flag.Int("server-id", 0, "Server ID for account partitioning (0-based)")
 	numServers := flag.Int("num-servers", 1, "Total number of servers in the cluster")
 	useOCC := flag.Bool("occ", false, "Use OCC instead of 2PL")
+	verboseFlag := flag.Bool("verbose", false, "Enable verbose logging (non-stats)")
 	flag.Parse()
+
+	// flag.Bool never returns nil, but keep pattern similar to client for clarity.
+	verbose = *verboseFlag
+	if !*verboseFlag {
+		log.SetOutput(io.Discard)
+	}
 
 	l, e := net.Listen("tcp", fmt.Sprintf(":%v", *port))
 	if e != nil {

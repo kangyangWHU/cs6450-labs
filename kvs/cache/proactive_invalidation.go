@@ -1,7 +1,6 @@
 package cache
 
 import (
-	"sync"
 	"time"
 )
 
@@ -9,7 +8,6 @@ import (
 // Servers track which clients have cached each key and push invalidations
 type ProactiveInvalidationStrategy struct {
 	*BaseCache
-	invalidationMu sync.RWMutex
 }
 
 // NewProactiveInvalidationStrategy creates a new proactive invalidation strategy
@@ -60,10 +58,14 @@ func (s *ProactiveInvalidationStrategy) OnCommit(readSet map[string]*CacheEntry,
 	// Read set entries remain valid (server will send invalidations if needed)
 }
 
-// OnAbort keeps cached entries - they may still be valid
-// Server will send invalidations if needed
+// OnAbort invalidates cached entries that caused validation failure
+// This forces fresh reads on retry, allowing invalidations to take effect
 func (s *ProactiveInvalidationStrategy) OnAbort(readSet map[string]*CacheEntry, writeSet map[string]*CacheEntry) {
-	// Keep all read set entries - rely on server invalidations
+	// Invalidate read set entries - they likely caused the abort
+	// This ensures next retry will either use pushed updates or fetch fresh data
+	for key := range readSet {
+		s.Delete(key)
+	}
 	// Discard write set entries (never committed)
 	for key := range writeSet {
 		s.Delete(key)
@@ -72,15 +74,35 @@ func (s *ProactiveInvalidationStrategy) OnAbort(readSet map[string]*CacheEntry, 
 
 // OnInvalidate is called when server sends an invalidation message
 // This is the key feature of this strategy
-func (s *ProactiveInvalidationStrategy) OnInvalidate(key string, version uint64) {
-	s.invalidationMu.Lock()
-	defer s.invalidationMu.Unlock()
+func (s *ProactiveInvalidationStrategy) OnInvalidate(key string, value string, version uint64) {
+	// Check if this is an invalidation signal (version=0, empty value)
+	// This means "delete your cache, fresh value coming later"
+	if version == 0 && value == "" {
+		s.Delete(key)
+		return
+	}
 
 	if entry, found := s.Get(key); found {
-		// If our cached version is older than invalidation version, remove it
+		// If our cached version is older than invalidation version, update it
 		if entry.Version < version {
-			s.Delete(key)
+			// Proactively UPDATE cache with the new value (not just delete)
+			newEntry := &CacheEntry{
+				Key:       key,
+				Value:     value,
+				Version:   version,
+				Timestamp: time.Now(),
+			}
+			s.Set(key, newEntry)
 		}
+	} else {
+		// Even if not cached before, proactively cache the new value
+		newEntry := &CacheEntry{
+			Key:       key,
+			Value:     value,
+			Version:   version,
+			Timestamp: time.Now(),
+		}
+		s.Set(key, newEntry)
 	}
 }
 

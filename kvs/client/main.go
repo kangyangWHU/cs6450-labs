@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 
 	// "fmt"
 	"log"
@@ -258,10 +259,10 @@ func executeTransaction(dc *DistributedClient, txn kvs.Transaction) bool {
 		}
 
 		if totalSum != txn.Amount {
-			log.Printf("VERIFICATION FAILED: Expected sum %d, but got %d\n", txn.Amount, totalSum)
+			fmt.Printf("VERIFICATION FAILED: Expected sum %d, but got %d\n", txn.Amount, totalSum)
 		} else {
 			// Verification succeeded - print account balances
-			log.Printf("VERIFICATION SUCCESS: Total=%d, Balances=%v\n", totalSum, accountBalances)
+			fmt.Printf("VERIFICATION SUCCESS: Total=%d, Balances=%v\n", totalSum, accountBalances)
 		}
 	}
 
@@ -327,13 +328,20 @@ func main() {
 	hosts := HostList{}
 	flag.Var(&hosts, "hosts", "Comma-separated list of host:ports to connect to")
 	theta := flag.Float64("theta", 0.99, "Zipfian distribution skew parameter")
-	workload := flag.String("workload", "XFER", "Workload type (YCSB-A, YCSB-B, YCSB-C, XFER, VERIFY)")
+	workload := flag.String("workload", "YCSB-B", "Workload type (YCSB-A, YCSB-B, YCSB-C, XFER, VERIFY)")
 	secs := flag.Int("secs", 30, "Duration in seconds for each client to run")
-	numClients := flag.Int("clients", 10, "Number of concurrent client goroutines")
+	numClients := flag.Int("clients", 50, "Number of concurrent client goroutines")
 	useOCC := flag.Bool("occ", false, "Use OCC instead of 2PL")
-	cacheStrategy := flag.String("cache-strategy", "discard-on-abort", "Cache strategy: discard-on-abort, proactive-invalidation, ttl-reuse")
+	cacheStrategy := flag.String("cache-strategy", "discard-on-abort", "Cache strategy: discard-on-abort, proactive-invalidation, ttl-reuse, no-cache")
 	ttl := flag.Duration("ttl", 100*time.Millisecond, "TTL for ttl-reuse strategy")
+	verboseFlag := flag.Bool("verbose", false, "Enable verbose logging")
 	flag.Parse()
+
+	if verboseFlag != nil && *verboseFlag {
+		log.SetFlags(log.LstdFlags | log.Lmicroseconds)
+	} else {
+		log.SetOutput(io.Discard)
+	}
 
 	if len(hosts) == 0 {
 		hosts = append(hosts, "localhost:8080")
@@ -350,15 +358,18 @@ func main() {
 		switch *cacheStrategy {
 		case "discard-on-abort":
 			strategy = cache.NewDiscardOnAbortStrategy()
-			log.Printf("Using Discard-on-Abort cache strategy\n")
+			fmt.Printf("Using Discard-on-Abort cache strategy\n")
 		case "proactive-invalidation":
 			strategy = cache.NewProactiveInvalidationStrategy()
-			log.Printf("Using Proactive Invalidation cache strategy\n")
+			fmt.Printf("Using Proactive Invalidation cache strategy\n")
 		case "ttl-reuse":
 			strategy = cache.NewTTLReuseStrategy(*ttl)
-			log.Printf("Using TTL Reuse cache strategy (TTL=%v)\n", *ttl)
+			fmt.Printf("Using TTL Reuse cache strategy (TTL=%v)\n", *ttl)
+		case "no-cache":
+			strategy = cache.NewNoCacheStrategy()
+			fmt.Printf("Using No-Cache strategy (always fetch from server)\n")
 		default:
-			log.Fatalf("Unknown cache strategy: %s\n", *cacheStrategy)
+			fmt.Printf("Unknown cache strategy: %s\n", *cacheStrategy)
 		}
 
 		// Start invalidation RPC server for proactive invalidation
@@ -404,13 +415,40 @@ func main() {
 	time.Sleep(time.Duration(*secs) * time.Second)
 	done.Store(true)
 
+	if *useOCC {
+		// Print OCC metrics
+		time.Sleep(time.Second * 2) // Wait for in-flight transactions to finish
+		commits := occCommits.Load()
+		aborts := occAborts.Load()
+		hits := cacheHits.Load()
+		misses := cacheMisses.Load()
+		totalTxns := commits + aborts
+		totalCacheAccess := hits + misses
+
+		if totalTxns > 0 {
+			commitRate := float64(commits) / float64(totalTxns) * 100
+			abortRate := float64(aborts) / float64(totalTxns) * 100
+			fmt.Printf("Commit/Abort Stats:\n")
+			fmt.Printf("  Total Transactions: %d\n", totalTxns)
+			fmt.Printf("  Commits: %d (%.2f%%)\n", commits, commitRate)
+			fmt.Printf("  Aborts: %d (%.2f%%)\n", aborts, abortRate)
+		}
+		if totalCacheAccess > 0 {
+			hitRatio := float64(hits) / float64(totalCacheAccess) * 100
+			missRatio := float64(misses) / float64(totalCacheAccess) * 100
+			fmt.Printf("Cache Hit Stats:\n")
+			fmt.Printf("  Total Cache Accesses: %d\n", totalCacheAccess)
+			fmt.Printf("  Cache Hits: %d (%.2f%%)\n", hits, hitRatio)
+			fmt.Printf("  Cache Misses: %d (%.2f%%)\n", misses, missRatio)
+		}
+	}
+
 	if *useOCC && *workload == "XFER" {
 		// All payment clients stopped
 		log.Printf("Stopping payment clients, waiting for them to finish...\n")
 		time.Sleep(time.Second * 5) // Wait longer for all goroutines to fully exit retry loops
-		log.Printf("All payment clients stopped\n")
 
-		log.Printf("Starting final verification transaction\n")
+		fmt.Printf("Starting final verification transaction\n")
 		txnWorkload := kvs.NewVerificationWorkload()
 		strategy := cache.NewDiscardOnAbortStrategy()
 
@@ -423,7 +461,7 @@ func main() {
 		maxRetries := 100
 		for attempt := 0; attempt < maxRetries && time.Since(startTime) < 10*time.Second; attempt++ {
 			if executeOCCTransaction(dc, txn) {
-				log.Printf("Final verification succeeded after %d attempts\n", attempt+1)
+				fmt.Printf("Final verification succeeded after %d attempts\n", attempt+1)
 				break
 			}
 			// Exponential backoff

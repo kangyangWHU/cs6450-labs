@@ -137,7 +137,7 @@ cleanup() {
     echo "Cleaning up processes on all nodes..."
     for node in "${SERVER_NODES[@]}" "${CLIENT_NODES[@]}"; do
         echo "Cleaning up processes on $node..."
-        ${SSH} $node "pkill -f 'kvs(server|client)' || true" 2>/dev/null || true
+        ${SSH} $node "pkill -f kvsserver || true; pkill -f kvsclient || true" 2>/dev/null || true
     done
     echo "Cleanup complete."
     echo

@@ -136,6 +136,7 @@ type OCCValidateResponse struct {
 // Proactive Invalidation - server notifies client of stale cache
 type InvalidateRequest struct {
 	Key     string
+	Value   string // Push the new value to client
 	Version uint64
 }
 

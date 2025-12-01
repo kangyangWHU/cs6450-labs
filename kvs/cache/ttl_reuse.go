@@ -78,7 +78,7 @@ func (s *TTLReuseStrategy) OnAbort(readSet map[string]*CacheEntry, writeSet map[
 }
 
 // OnInvalidate is not used by this strategy (relies on TTL)
-func (s *TTLReuseStrategy) OnInvalidate(key string, version uint64) {
+func (s *TTLReuseStrategy) OnInvalidate(key string, value string, version uint64) {
 	// No-op: This strategy relies on TTL, not invalidations
 }
 

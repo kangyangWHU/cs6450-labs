@@ -35,8 +35,8 @@ type CacheStrategy interface {
 	OnAbort(readSet map[string]*CacheEntry, writeSet map[string]*CacheEntry)
 
 	// OnInvalidate is called by server for proactive invalidation
-	// Only used by ProactiveInvalidation strategy
-	OnInvalidate(key string, version uint64)
+	// Only used by ProactiveInvalidation strategy (pushes new value and version)
+	OnInvalidate(key string, value string, version uint64)
 
 	// GetCacheEntry retrieves a cache entry if present
 	GetCacheEntry(key string) (*CacheEntry, bool)
@@ -48,7 +48,6 @@ type CacheStrategy interface {
 // BaseCache provides common cache functionality
 type BaseCache struct {
 	cache sync.Map // map[string]*CacheEntry
-	mu    sync.RWMutex
 }
 
 // NewBaseCache creates a new base cache
