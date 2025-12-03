@@ -49,7 +49,7 @@ func (s *OCCClientInvalidationService) ReceiveInvalidation(request *kvs.Invalida
 	// fmt.Printf("Received invalidation for key %s (value=%s, version=%d)\n", request.Key, request.Value, request.Version)
 	if proactiveStrategy, ok := s.strategy.(*cache.ProactiveInvalidationStrategy); ok {
 		proactiveStrategy.OnInvalidate(request.Key, request.Value, request.Version)
-		fmt.Printf("Updated cache for key %s with new value\n", request.Key)
+		// fmt.Printf("Updated cache for key %s with new value\n", request.Key)
 	}
 	return nil
 }
@@ -86,7 +86,9 @@ func NewOCCDistributedClient(hosts []string, clientId string, strategy cache.Cac
 func (client *OCCClient) OCCBegin() string {
 	reqClientId := client.clientId
 	reqCallbackHost := client.callbackHost
-	if client.cacheStrategy.GetName() == "no-cache" {
+	// Only send client info for proactive invalidation strategy
+	// Other strategies don't need server-side tracking
+	if client.cacheStrategy.GetName() != "proactive-invalidation" {
 		reqClientId = ""
 		reqCallbackHost = ""
 	}
@@ -114,9 +116,10 @@ func (client *OCCClient) OCCTxnGet(txnId string, key string) (string, uint64, bo
 	// Cache miss - fetch from server
 	cacheMisses.Add(1)
 
-	// Optimization: Don't send ClientId for no-cache strategy to avoid server tracking overhead
+	// Optimization: Only send ClientId for proactive invalidation strategy
+	// Other strategies don't need server tracking
 	reqClientId := client.clientId
-	if client.cacheStrategy.GetName() == "no-cache" {
+	if client.cacheStrategy.GetName() != "proactive-invalidation" {
 		reqClientId = ""
 	}
 
