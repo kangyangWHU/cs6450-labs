@@ -16,6 +16,7 @@ import (
 )
 
 // Global OCC metrics
+// TODO: Can potentially affect efficiency. Low priority.
 var (
 	occCommits  atomic.Uint64
 	occAborts   atomic.Uint64
@@ -33,7 +34,7 @@ type OCCClient struct {
 
 // OCCDistributedClient manages multiple OCC clients with caching
 type OCCDistributedClient struct {
-	clients       []*OCCClient
+	clients       []*OCCClient // a list of client instances
 	numServers    int
 	cacheStrategy cache.CacheStrategy
 	callbackHost  string
@@ -46,10 +47,10 @@ type OCCClientInvalidationService struct {
 
 // ReceiveInvalidation handles invalidation RPC from server
 func (s *OCCClientInvalidationService) ReceiveInvalidation(request *kvs.InvalidationRequest, response *kvs.InvalidationResponse) error {
-	// fmt.Printf("Received invalidation for key %s (value=%s, version=%d)\n", request.Key, request.Value, request.Version)
+	// log.Printf("Received invalidation for key %s (value=%s, version=%d)\n", request.Key, request.Value, request.Version)
 	if proactiveStrategy, ok := s.strategy.(*cache.ProactiveInvalidationStrategy); ok {
 		proactiveStrategy.OnInvalidate(request.Key, request.Value, request.Version)
-		fmt.Printf("Updated cache for key %s with new value\n", request.Key)
+		log.Printf("Updated cache for key %s with new value\n", request.Key)
 	}
 	return nil
 }
@@ -207,7 +208,7 @@ func executeOCCTransaction(dc *OCCDistributedClient, txn kvs.Transaction) bool {
 	// Determine participating servers
 	participantIds := make(map[int]bool)
 	for _, op := range txn.Operations {
-		serverId := int(op.Key) % dc.numServers
+		serverId := int(op.Key) % dc.numServers // Simple server selection based on key hash
 		participantIds[serverId] = true
 	}
 
@@ -398,9 +399,9 @@ func executeOCCTransaction(dc *OCCDistributedClient, txn kvs.Transaction) bool {
 			}
 
 			if totalSum != txn.Amount {
-				fmt.Printf("VERIFICATION FAILED: Expected %d, got %d\n", txn.Amount, totalSum)
+				log.Printf("VERIFICATION FAILED: Expected %d, got %d\n", txn.Amount, totalSum)
 			} else {
-				fmt.Printf("VERIFICATION SUCCESS: Total=%d, Balances=%v\n", totalSum, accountBalances)
+				log.Printf("VERIFICATION SUCCESS: Total=%d, Balances=%v\n", totalSum, accountBalances)
 			}
 		}
 
