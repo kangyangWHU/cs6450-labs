@@ -171,7 +171,7 @@ class ExperimentRunner:
         
         # YCSB-B workload (95% reads, 5% writes) with different contention levels
         # contention_levels = [0.01, 0.25, 0.5, 0.75, 0.99]
-        contention_levels = [0.75]
+        contention_levels = [0.99]
         # OCC experiments with YCSB-B and different contention
         for theta in contention_levels:
             all_args = MethodArguments(num_threads_clients=num_threads_clients, read_ratio=read_ratio, theta=theta, secs=secs).get_args()
@@ -212,6 +212,14 @@ class ExperimentRunner:
                         if match:
                             results['theta'] = float(match.group(1))
                     
+                    # Extract secs from client args
+                    if '-secs' in args[0]:
+                        match = re.search(r'-secs (\d+)', args[0])
+                        if match:
+                            results['secs'] = int(match.group(1))
+                    else:
+                        results['secs'] = 1  # Default to 1 to avoid division by zero
+                    
                     # Extract workload from client args
                     if '-workload' in args[0]:
                         match = re.search(r'-workload (\S+)', args[0])
@@ -226,13 +234,18 @@ class ExperimentRunner:
                     
                     # calculate totals and rates
                     total_txns = results['commits'] + results['aborts']
+                    secs = results['secs']
                     results['total_transactions'] = total_txns
                     results['commit_rate'] = (results['commits'] / total_txns * 100) if total_txns > 0 else 0.0
                     results['abort_rate'] = (results['aborts'] / total_txns * 100) if total_txns > 0 else 0.0
+                    results['commits_per_sec'] = results['commits'] / secs
+                    results['aborts_per_sec'] = results['aborts'] / secs
                     total_cache_accesses = results['cache_hits'] + results['cache_misses']
                     results['total_cache_accesses'] = total_cache_accesses
                     results['cache_hit_rate'] = (results['cache_hits'] / total_cache_accesses * 100) if total_cache_accesses > 0 else 0.0
                     results['cache_miss_rate'] = (results['cache_misses'] / total_cache_accesses * 100) if total_cache_accesses > 0 else 0.0
+                    results['cache_hits_per_sec'] = results['cache_hits'] / secs
+                    results['cache_misses_per_sec'] = results['cache_misses'] / secs
                     
                     method_res.append(results)
                    
@@ -326,13 +339,17 @@ class ExperimentRunner:
             print()
         
         # Print tables for each metric
-        print_metric_table("Commits", "commits", "{:.0f}")
+        # print_metric_table("Commits", "commits", "{:.0f}")
+        print_metric_table("Commits/sec", "commits_per_sec", "{:.2f}")
         print_metric_table("Commit Rate (%)", "commit_rate", "{:.2f}")
-        print_metric_table("Aborts", "aborts", "{:.0f}")
+        # print_metric_table("Aborts", "aborts", "{:.0f}")
+        print_metric_table("Aborts/sec", "aborts_per_sec", "{:.2f}")
         print_metric_table("Abort Rate (%)", "abort_rate", "{:.2f}")
-        print_metric_table("Cache Hits", "cache_hits", "{:.0f}")
+        # print_metric_table("Cache Hits", "cache_hits", "{:.0f}")
+        print_metric_table("Cache Hits/sec", "cache_hits_per_sec", "{:.2f}")
         print_metric_table("Cache Hit Rate (%)", "cache_hit_rate", "{:.2f}")
-        print_metric_table("Cache Misses", "cache_misses", "{:.0f}")
+        # print_metric_table("Cache Misses", "cache_misses", "{:.0f}")
+        print_metric_table("Cache Misses/sec", "cache_misses_per_sec", "{:.2f}")
         print_metric_table("Cache Miss Rate (%)", "cache_miss_rate", "{:.2f}")
         
         print(f"{'='*140}\n")
@@ -356,7 +373,7 @@ def main():
     
     # Run all experiments
     runner.run_theta_experiments(client_count=2, server_count=2, 
-                                          num_threads_clients=1, read_ratio=0.95, secs=10)
+                                          num_threads_clients=50, read_ratio=0.75, secs=5)
     print("\nAll experiments completed!")
 
 

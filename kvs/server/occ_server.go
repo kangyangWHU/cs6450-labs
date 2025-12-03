@@ -144,16 +144,55 @@ func (kv *OCCKVService) OCCPrepare(request *kvs.OCCValidateRequest, response *kv
 		localWriteSetKeys[writeItem.Key] = true
 	}
 
-	// OCC Forward Validation:
-	// 1. For each read key: check it's not in global write set AND version matches
-	// 2. For each write key: check it's not in global write set AND not in global read set
+	// TRUE OCC: Pre-validate WITHOUT holding global lock
+	// Phase 1: Optimistic validation (no locks held)
 
-	// CRITICAL SECTION START: Only lock during validation checks and global set updates
+	// Pre-validate read set: check versions match (optimistically - may change before commit)
+	for _, readItem := range request.ReadSet {
+		currentVal, found := kv.store.Load(readItem.Key)
+		if readItem.Version == 0 && readItem.Value == "" {
+			// Expected empty/missing key
+			if found {
+				currentEntry := currentVal.(*VersionedEntry)
+				if currentEntry.Value != "" || currentEntry.Version != 0 {
+					log.Printf("OCC Pre-validation failed for txn %s: read key %s changed (expected empty, got v%d)\n",
+						request.TxnId, readItem.Key, currentEntry.Version)
+					return nil
+				}
+			}
+		} else {
+			// Expected specific version
+			if !found {
+				log.Printf("OCC Pre-validation failed for txn %s: read key %s not found (expected v%d)\n",
+					request.TxnId, readItem.Key, readItem.Version)
+				return nil
+			}
+			currentEntry := currentVal.(*VersionedEntry)
+			if currentEntry.Version != readItem.Version {
+				log.Printf("OCC Pre-validation failed for txn %s: read key %s version mismatch (expected v%d, got v%d)\n",
+					request.TxnId, readItem.Key, readItem.Version, currentEntry.Version)
+				return nil
+			}
+		}
+	}
+
+	// Create transaction object to store
+	txn := NewOCCTransaction(request.TxnId)
+	for _, readItem := range request.ReadSet {
+		if localWriteSetKeys[readItem.Key] {
+			continue // Skip keys we're also writing
+		}
+		txn.readSet[readItem.Key] = readItem.Version
+	}
+	for _, writeItem := range request.WriteSet {
+		txn.writeSet[writeItem.Key] = writeItem.Value
+	}
+
+	// Phase 2: CRITICAL SECTION - Atomic validation and lock acquisition
+	// This is the ONLY place we hold the global lock, and we hold it BRIEFLY
 	kv.globalMu.Lock()
 
-	// Validate read set (including keys also written later). We must still
-	// ensure versions match for read-write keys to avoid lost updates that
-	// would break invariants like total balance conservation.
+	// Re-validate read set while holding lock (catch races from pre-validation to now)
 	for _, readItem := range request.ReadSet {
 		// Check if key is in global write set (another txn is writing to it)
 		if writerTxn, found := kv.globalWriteSet.Load(readItem.Key); found {
@@ -163,10 +202,9 @@ func (kv *OCCKVService) OCCPrepare(request *kvs.OCCValidateRequest, response *kv
 			return nil
 		}
 
-		// Check if version matches current committed value
+		// Re-check version matches current committed value
 		currentVal, found := kv.store.Load(readItem.Key)
 		if readItem.Version == 0 && readItem.Value == "" {
-			// Expected empty/missing key
 			if found {
 				currentEntry := currentVal.(*VersionedEntry)
 				if currentEntry.Value != "" || currentEntry.Version != 0 {
@@ -177,7 +215,6 @@ func (kv *OCCKVService) OCCPrepare(request *kvs.OCCValidateRequest, response *kv
 				}
 			}
 		} else {
-			// Expected specific version
 			if !found {
 				kv.globalMu.Unlock()
 				log.Printf("OCC Validation failed for txn %s: read key %s not found (expected v%d)\n",
@@ -194,7 +231,7 @@ func (kv *OCCKVService) OCCPrepare(request *kvs.OCCValidateRequest, response *kv
 		}
 	}
 
-	// Validate write set
+	// Validate and lock write set
 	for _, writeItem := range request.WriteSet {
 		// Check if key is in global write set (write-write conflict)
 		if writerTxn, found := kv.globalWriteSet.Load(writeItem.Key); found {
@@ -216,31 +253,26 @@ func (kv *OCCKVService) OCCPrepare(request *kvs.OCCValidateRequest, response *kv
 		}
 	}
 
-	// Validation passed - add to global read/write sets and store transaction
-	txn := NewOCCTransaction(request.TxnId)
-
+	// Validation passed - atomically add to global read/write sets
 	// Add reads to global read set
 	for _, readItem := range request.ReadSet {
 		if localWriteSetKeys[readItem.Key] {
 			continue // Skip keys we're also writing
 		}
-		txn.readSet[readItem.Key] = readItem.Version
-
 		readerSetVal, _ := kv.globalReadSet.LoadOrStore(readItem.Key, make(map[string]bool))
 		readerSet := readerSetVal.(map[string]bool)
 		readerSet[request.TxnId] = true
 		kv.globalReadSet.Store(readItem.Key, readerSet)
 	}
 
-	// Add writes to global write set
+	// Add writes to global write set (lock the keys)
 	for _, writeItem := range request.WriteSet {
-		txn.writeSet[writeItem.Key] = writeItem.Value
 		kv.globalWriteSet.Store(writeItem.Key, request.TxnId)
 	}
 
 	kv.transactions.Store(request.TxnId, txn)
 
-	// CRITICAL SECTION END
+	// CRITICAL SECTION END - lock held only for atomic validation + lock acquisition
 	kv.globalMu.Unlock()
 
 	response.Success = true
@@ -261,10 +293,8 @@ func (kv *OCCKVService) OCCCommit(request *kvs.OCCValidateRequest, response *kvs
 
 	txn := txnVal.(*OCCTransaction)
 
-	// CRITICAL SECTION START: Only lock during store updates and global set cleanup
-	kv.globalMu.Lock()
-
-	// Apply all writes with incremented versions
+	// TRUE OCC: Prepare new entries outside the lock
+	newEntries := make(map[string]*VersionedEntry)
 	for key, value := range txn.writeSet {
 		currentVal, found := kv.store.Load(key)
 		var newVersion uint64
@@ -274,13 +304,18 @@ func (kv *OCCKVService) OCCCommit(request *kvs.OCCValidateRequest, response *kvs
 		} else {
 			newVersion = 1
 		}
-
-		// Apply write with new version
-		kv.store.Store(key, &VersionedEntry{
+		newEntries[key] = &VersionedEntry{
 			Value:   value,
 			Version: newVersion,
-		})
+		}
+	}
 
+	// CRITICAL SECTION START: Minimal lock just for atomic write
+	kv.globalMu.Lock()
+
+	// Atomically apply all writes
+	for key, entry := range newEntries {
+		kv.store.Store(key, entry)
 		// Remove from global write set
 		kv.globalWriteSet.Delete(key)
 	}
@@ -298,7 +333,7 @@ func (kv *OCCKVService) OCCCommit(request *kvs.OCCValidateRequest, response *kvs
 		}
 	}
 
-	// CRITICAL SECTION END
+	// CRITICAL SECTION END - lock held only for atomic writes
 	kv.globalMu.Unlock()
 
 	response.Success = true
@@ -311,11 +346,10 @@ func (kv *OCCKVService) OCCCommit(request *kvs.OCCValidateRequest, response *kvs
 	kv.transactions.Delete(request.TxnId)
 
 	// Proactive invalidation: push new value to clients (outside lock - async network I/O)
-	// Uncomment if not sending in Prepare phase
-	for key, value := range txn.writeSet {
-		currentVal, _ := kv.store.Load(key)
-		entry := currentVal.(*VersionedEntry)
-		kv.sendInvalidations(key, value, entry.Version)
+	for key := range txn.writeSet {
+		if entry, ok := newEntries[key]; ok {
+			kv.sendInvalidations(key, entry.Value, entry.Version)
+		}
 	}
 
 	return nil
