@@ -361,35 +361,44 @@ func main() {
 	done := atomic.Bool{}
 
 	if *useOCC {
-		// Create cache strategy based on flag
-		var strategy cache.CacheStrategy
+		// Print cache strategy info
 		switch *cacheStrategy {
 		case "discard-on-abort":
-			strategy = cache.NewDiscardOnAbortStrategy()
 			fmt.Printf("Using Discard-on-Abort cache strategy\n")
 		case "proactive-invalidation":
-			strategy = cache.NewProactiveInvalidationStrategy()
 			fmt.Printf("Using Proactive Invalidation cache strategy\n")
 		case "ttl-reuse":
-			strategy = cache.NewTTLReuseStrategy(*ttl)
 			fmt.Printf("Using TTL Reuse cache strategy (TTL=%v)\n", *ttl)
 		case "no-cache":
-			strategy = cache.NewNoCacheStrategy()
 			fmt.Printf("Using No-Cache strategy (always fetch from server)\n")
 		default:
 			fmt.Printf("Unknown cache strategy: %s\n", *cacheStrategy)
 		}
 
-		// Start invalidation RPC server for proactive invalidation
-		var callbackHost string
-		if *cacheStrategy == "proactive-invalidation" {
-			callbackHost = startInvalidationServer(strategy)
-			log.Printf("Started invalidation RPC server on %s\n", callbackHost)
-		}
-
-		// Start OCC clients
+		// Start OCC clients - each with its own cache strategy instance
 		for clientId := 0; clientId < *numClients; clientId++ {
 			go func(clientId int) {
+				// Create a separate cache strategy instance for each client
+				var strategy cache.CacheStrategy
+				switch *cacheStrategy {
+				case "discard-on-abort":
+					strategy = cache.NewDiscardOnAbortStrategy()
+				case "proactive-invalidation":
+					strategy = cache.NewProactiveInvalidationStrategy()
+				case "ttl-reuse":
+					strategy = cache.NewTTLReuseStrategy(*ttl)
+				case "no-cache":
+					strategy = cache.NewNoCacheStrategy()
+				default:
+					strategy = cache.NewDiscardOnAbortStrategy() // Default fallback
+				}
+
+				// Start invalidation RPC server for proactive invalidation (per client)
+				var callbackHost string
+				if *cacheStrategy == "proactive-invalidation" {
+					callbackHost = startInvalidationServer(strategy)
+				}
+
 				var txnWorkload kvs.TransactionWorkload
 				if *workload == "XFER" {
 					txnWorkload = kvs.NewPaymentWorkload()

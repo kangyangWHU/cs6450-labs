@@ -462,9 +462,9 @@ func runOCCTransactionClient(hosts []string, done interface{}, workload kvs.Tran
 func startInvalidationServer(strategy cache.CacheStrategy) string {
 	invalidationService := &OCCClientInvalidationService{strategy: strategy}
 
-	// Register the invalidation service with HTTP
-	rpc.Register(invalidationService)
-	rpc.HandleHTTP()
+	// Create a NEW RPC server instance (not the global default)
+	rpcServer := rpc.NewServer()
+	rpcServer.Register(invalidationService)
 
 	// Listen on a random available port
 	listener, err := net.Listen("tcp", ":0")
@@ -484,8 +484,12 @@ func startInvalidationServer(strategy cache.CacheStrategy) string {
 
 	callbackHost := fmt.Sprintf("%s:%d", hostname, port)
 
-	// Start serving HTTP in background
-	go http.Serve(listener, nil)
+	// Create a new HTTP mux for this RPC server
+	mux := http.NewServeMux()
+	mux.Handle(rpc.DefaultRPCPath, rpcServer)
+
+	// Start serving HTTP in background with the dedicated mux
+	go http.Serve(listener, mux)
 
 	return callbackHost
 }
