@@ -47,13 +47,19 @@ func (s *ProactiveInvalidationStrategy) OnServerRead(key string, value string, v
 func (s *ProactiveInvalidationStrategy) OnCommit(readSet map[string]*CacheEntry, writeSet map[string]*CacheEntry) {
 	// Update cache with all writes from the committed transaction
 	for key, entry := range writeSet {
-		newEntry := &CacheEntry{
-			Key:       key,
-			Value:     entry.Value,
-			Version:   entry.Version + 1, // Server incremented version
-			Timestamp: time.Now(),
+		// Only update if we read the key (so we know the base version)
+		if _, read := readSet[key]; read {
+			newEntry := &CacheEntry{
+				Key:       key,
+				Value:     entry.Value,
+				Version:   entry.Version + 1, // Server incremented version
+				Timestamp: time.Now(),
+			}
+			s.Set(key, newEntry)
+		} else {
+			// Blind write: we don't know the server version, so invalidate
+			s.Delete(key)
 		}
-		s.Set(key, newEntry)
 	}
 	// Read set entries remain valid (server will send invalidations if needed)
 }

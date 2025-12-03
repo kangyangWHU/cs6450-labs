@@ -243,33 +243,6 @@ func (kv *OCCKVService) OCCPrepare(request *kvs.OCCValidateRequest, response *kv
 	// CRITICAL SECTION END
 	kv.globalMu.Unlock()
 
-	// OPTION 1: Send early invalidations in Prepare phase (AGGRESSIVE)
-	// Push immediately after validation passes (outside lock - async network I/O)
-	// Pros: Fastest propagation, lowest commit latency
-	// Cons: Pushes uncommitted data, clients see speculative values if abort
-
-	for _, writeItem := range request.WriteSet {
-		currentVal, found := kv.store.Load(writeItem.Key)
-		var futureVersion uint64
-		if found {
-			currentEntry := currentVal.(*VersionedEntry)
-			futureVersion = currentEntry.Version + 1
-		} else {
-			futureVersion = 1
-		}
-		kv.sendInvalidations(writeItem.Key, writeItem.Value, futureVersion)
-	}
-
-	// OPTION 2: Send invalidation SIGNAL only (SAFE)
-	// Tell clients to invalidate cache but don't push value yet
-	// Value will be pushed in Commit phase
-	// Uncomment to enable safe early invalidation
-	/*
-		for _, writeItem := range request.WriteSet {
-			kv.sendInvalidationSignal(writeItem.Key)
-		}
-	*/
-
 	response.Success = true
 	return nil
 }
@@ -339,11 +312,11 @@ func (kv *OCCKVService) OCCCommit(request *kvs.OCCValidateRequest, response *kvs
 
 	// Proactive invalidation: push new value to clients (outside lock - async network I/O)
 	// Uncomment if not sending in Prepare phase
-	// for key, value := range txn.writeSet {
-	// 	currentVal, _ := kv.store.Load(key)
-	// 	entry := currentVal.(*VersionedEntry)
-	// 	kv.sendInvalidations(key, value, entry.Version)
-	// }
+	for key, value := range txn.writeSet {
+		currentVal, _ := kv.store.Load(key)
+		entry := currentVal.(*VersionedEntry)
+		kv.sendInvalidations(key, value, entry.Version)
+	}
 
 	return nil
 }
@@ -419,17 +392,22 @@ func (kv *OCCKVService) sendInvalidations(key string, value string, newVersion u
 
 				// Send invalidation RPC with new value to client (best-effort, don't block on failure)
 				go func(cid, h, v string, ver uint64) {
+					log.Printf("Sending invalidation to client %s at %s for key %s (value=%s, version=%d)\n", cid, h, key, v, ver)
 					if err := sendClientInvalidation(h, key, v, ver); err != nil {
 						log.Printf("Failed to send invalidation to client %s: %v\n", cid, err)
+					} else {
+						log.Printf("Successfully sent invalidation to client %s for key %s\n", cid, key)
 					}
 				}(clientId, host, value, newVersion)
+			} else {
+				log.Printf("No connection info found for client %s\n", clientId)
 			}
 
 			return true
 		})
 
 		// Clear tracking for this key after sending invalidations
-		kv.cacheTracking.Delete(key)
+		// kv.cacheTracking.Delete(key)
 	}
 }
 

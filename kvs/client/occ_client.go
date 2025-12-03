@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/rpc"
+	"os"
 	"strconv"
 	"sync/atomic"
 	"time"
@@ -45,8 +46,10 @@ type OCCClientInvalidationService struct {
 
 // ReceiveInvalidation handles invalidation RPC from server
 func (s *OCCClientInvalidationService) ReceiveInvalidation(request *kvs.InvalidationRequest, response *kvs.InvalidationResponse) error {
+	// fmt.Printf("Received invalidation for key %s (value=%s, version=%d)\n", request.Key, request.Value, request.Version)
 	if proactiveStrategy, ok := s.strategy.(*cache.ProactiveInvalidationStrategy); ok {
 		proactiveStrategy.OnInvalidate(request.Key, request.Value, request.Version)
+		fmt.Printf("Updated cache for key %s with new value\n", request.Key)
 	}
 	return nil
 }
@@ -471,7 +474,15 @@ func startInvalidationServer(strategy cache.CacheStrategy) string {
 
 	// Get the actual port assigned
 	port := listener.Addr().(*net.TCPAddr).Port
-	callbackHost := fmt.Sprintf("localhost:%d", port)
+
+	// Get the actual hostname (not localhost) for distributed systems
+	hostname, err := os.Hostname()
+	if err != nil {
+		log.Printf("Warning: Failed to get hostname, using localhost: %v", err)
+		hostname = "localhost"
+	}
+
+	callbackHost := fmt.Sprintf("%s:%d", hostname, port)
 
 	// Start serving HTTP in background
 	go http.Serve(listener, nil)

@@ -17,6 +17,11 @@ import (
 	"github.com/rstutsman/cs6450-labs/kvs/cache"
 )
 
+var (
+	twoPLCommits atomic.Uint64
+	twoPLAborts  atomic.Uint64
+)
+
 type HostList []string
 
 // `String` returns a string representation of the HostList.
@@ -313,8 +318,10 @@ func runTransactionClient(hosts []string, done *atomic.Bool, workload kvs.Transa
 		// Execute transaction with retry logic
 		for attempt := 0; !done.Load(); attempt++ {
 			if executeTransaction(dc, txn) {
+				twoPLCommits.Add(1)
 				break
 			}
+			twoPLAborts.Add(1)
 			// randomly sleep between 1ms to (1 + attempt)ms
 			time.Sleep(time.Millisecond * time.Duration(1+attempt))
 		}
@@ -333,7 +340,8 @@ func main() {
 	numClients := flag.Int("clients", 50, "Number of concurrent client goroutines")
 	useOCC := flag.Bool("occ", false, "Use OCC instead of 2PL")
 	cacheStrategy := flag.String("cache-strategy", "discard-on-abort", "Cache strategy: discard-on-abort, proactive-invalidation, ttl-reuse, no-cache")
-	ttl := flag.Duration("ttl", 100*time.Millisecond, "TTL for ttl-reuse strategy")
+	ttl := flag.Duration("ttl", 100*time.Millisecond, "TTL for ttl-reuse strategy (e.g., 100ms, 1s)")
+
 	verboseFlag := flag.Bool("verbose", false, "Enable verbose logging")
 	flag.Parse()
 
@@ -347,7 +355,7 @@ func main() {
 		hosts = append(hosts, "localhost:8080")
 	}
 
-	log.Printf("hosts %v\ntheta %.2f\nworkload %s\nsecs %d\nclients %d\nocc %v\ncache-strategy %s\nttl %v\n",
+	fmt.Printf("hosts %v\ntheta %.2f\nworkload %s\nsecs %d\nclients %d\nocc %v\ncache-strategy %s\nttl %v\n",
 		hosts, *theta, *workload, *secs, *numClients, *useOCC, *cacheStrategy, *ttl)
 
 	done := atomic.Bool{}
@@ -440,6 +448,21 @@ func main() {
 			fmt.Printf("  Total Cache Accesses: %d\n", totalCacheAccess)
 			fmt.Printf("  Cache Hits: %d (%.2f%%)\n", hits, hitRatio)
 			fmt.Printf("  Cache Misses: %d (%.2f%%)\n", misses, missRatio)
+		}
+	} else {
+		// Print 2PL metrics
+		time.Sleep(time.Second * 2) // Wait for in-flight transactions to finish
+		commits := twoPLCommits.Load()
+		aborts := twoPLAborts.Load()
+		totalTxns := commits + aborts
+
+		if totalTxns > 0 {
+			commitRate := float64(commits) / float64(totalTxns) * 100
+			abortRate := float64(aborts) / float64(totalTxns) * 100
+			fmt.Printf("Commit/Abort Stats:\n")
+			fmt.Printf("  Total Transactions: %d\n", totalTxns)
+			fmt.Printf("  Commits: %d (%.2f%%)\n", commits, commitRate)
+			fmt.Printf("  Aborts: %d (%.2f%%)\n", aborts, abortRate)
 		}
 	}
 

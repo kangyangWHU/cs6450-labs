@@ -45,18 +45,10 @@ func (s *DiscardOnAbortStrategy) OnServerRead(key string, value string, version 
 
 // OnCommit updates cache with committed writes
 func (s *DiscardOnAbortStrategy) OnCommit(readSet map[string]*CacheEntry, writeSet map[string]*CacheEntry) {
-	// Update cache with all writes from the committed transaction
-	for key, entry := range writeSet {
-		// Increment version for writes (server will have incremented it)
-		newEntry := &CacheEntry{
-			Key:       key,
-			Value:     entry.Value,
-			Version:   entry.Version + 1, // Server incremented version
-			Timestamp: time.Now(),
-		}
-		s.Set(key, newEntry)
+	// Discard write set entries to avoid stale reads
+	for key := range writeSet {
+		s.Delete(key)
 	}
-	// Read set entries remain valid (no action needed)
 }
 
 // OnAbort removes entries that caused the abort
