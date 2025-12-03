@@ -84,9 +84,16 @@ func NewOCCDistributedClient(hosts []string, clientId string, strategy cache.Cac
 
 // OCCBegin starts a new OCC transaction
 func (client *OCCClient) OCCBegin() string {
+	reqClientId := client.clientId
+	reqCallbackHost := client.callbackHost
+	if client.cacheStrategy.GetName() == "no-cache" {
+		reqClientId = ""
+		reqCallbackHost = ""
+	}
+
 	request := kvs.OCCBeginRequest{
-		ClientId:           client.clientId,
-		ClientCallbackHost: client.callbackHost,
+		ClientId:           reqClientId,
+		ClientCallbackHost: reqCallbackHost,
 	}
 	response := kvs.OCCBeginResponse{}
 	err := client.rpcClient.Call("OCCKVService.OCCBegin", &request, &response)
@@ -106,10 +113,17 @@ func (client *OCCClient) OCCTxnGet(txnId string, key string) (string, uint64, bo
 
 	// Cache miss - fetch from server
 	cacheMisses.Add(1)
+
+	// Optimization: Don't send ClientId for no-cache strategy to avoid server tracking overhead
+	reqClientId := client.clientId
+	if client.cacheStrategy.GetName() == "no-cache" {
+		reqClientId = ""
+	}
+
 	request := kvs.OCCTxnGetRequest{
 		TxnId:    txnId,
 		Key:      key,
-		ClientId: client.clientId,
+		ClientId: reqClientId,
 	}
 	response := kvs.OCCTxnGetResponse{}
 	err := client.rpcClient.Call("OCCKVService.OCCTxnGet", &request, &response)
