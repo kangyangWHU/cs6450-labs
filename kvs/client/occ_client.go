@@ -87,7 +87,9 @@ func NewOCCDistributedClient(hosts []string, clientId string, strategy cache.Cac
 func (client *OCCClient) OCCBegin() string {
 	reqClientId := client.clientId
 	reqCallbackHost := client.callbackHost
-	if client.cacheStrategy.GetName() == "no-cache" {
+	// Only send client info for proactive invalidation strategy
+	// Other strategies don't need server-side tracking
+	if client.cacheStrategy.GetName() != "proactive-invalidation" {
 		reqClientId = ""
 		reqCallbackHost = ""
 	}
@@ -105,19 +107,22 @@ func (client *OCCClient) OCCBegin() string {
 }
 
 // OCCTxnGet reads a value, using cache if possible
-func (client *OCCClient) OCCTxnGet(txnId string, key string) (string, uint64, bool) {
+func (client *OCCClient) OCCTxnGet(txnId string, key string, bypassCache bool) (string, uint64, bool) {
 	// Try cache first
-	if cachedEntry, found := client.cacheStrategy.OnRead(key); found {
-		cacheHits.Add(1)
-		return cachedEntry.Value, cachedEntry.Version, true
+	if !bypassCache {
+		if cachedEntry, found := client.cacheStrategy.OnRead(key); found {
+			cacheHits.Add(1)
+			return cachedEntry.Value, cachedEntry.Version, true
+		}
 	}
 
 	// Cache miss - fetch from server
 	cacheMisses.Add(1)
 
-	// Optimization: Don't send ClientId for no-cache strategy to avoid server tracking overhead
+	// Optimization: Only send ClientId for proactive invalidation strategy
+	// Other strategies don't need server tracking
 	reqClientId := client.clientId
-	if client.cacheStrategy.GetName() == "no-cache" {
+	if client.cacheStrategy.GetName() != "proactive-invalidation" {
 		reqClientId = ""
 	}
 
@@ -259,7 +264,8 @@ func executeOCCTransaction(dc *OCCDistributedClient, txn kvs.Transaction) bool {
 		txnId := txnIds[serverId]
 
 		if op.OpType == kvs.TxnGet {
-			value, version, found := client.OCCTxnGet(txnId, keyStr)
+			bypassCache := txn.TxnType == kvs.VerificationTxn
+			value, version, found := client.OCCTxnGet(txnId, keyStr, bypassCache)
 			if !found {
 				// Abort all participants
 				for _, pServerId := range participants {

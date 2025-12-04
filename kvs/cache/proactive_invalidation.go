@@ -34,6 +34,12 @@ func (s *ProactiveInvalidationStrategy) OnRead(key string) (*CacheEntry, bool) {
 
 // OnServerRead updates cache after fetching from server
 func (s *ProactiveInvalidationStrategy) OnServerRead(key string, value string, version uint64) {
+	// Check if we already have a newer version (e.g. from invalidation)
+	if entry, found := s.Get(key); found {
+		if entry.Version >= version {
+			return
+		}
+	}
 	entry := &CacheEntry{
 		Key:       key,
 		Value:     value,
@@ -49,10 +55,18 @@ func (s *ProactiveInvalidationStrategy) OnCommit(readSet map[string]*CacheEntry,
 	for key, entry := range writeSet {
 		// Only update if we read the key (so we know the base version)
 		if _, read := readSet[key]; read {
+			newVersion := entry.Version + 1
+			// Check if we already have a newer version
+			if current, found := s.Get(key); found {
+				if current.Version >= newVersion {
+					continue
+				}
+			}
+
 			newEntry := &CacheEntry{
 				Key:       key,
 				Value:     entry.Value,
-				Version:   entry.Version + 1, // Server incremented version
+				Version:   newVersion, // Server incremented version
 				Timestamp: time.Now(),
 			}
 			s.Set(key, newEntry)

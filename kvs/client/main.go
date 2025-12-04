@@ -341,6 +341,7 @@ func main() {
 	useOCC := flag.Bool("occ", false, "Use OCC instead of 2PL")
 	cacheStrategy := flag.String("cache-strategy", "discard-on-abort", "Cache strategy: discard-on-abort, proactive-invalidation, ttl-reuse, no-cache")
 	ttl := flag.Duration("ttl", 100*time.Millisecond, "TTL for ttl-reuse strategy (e.g., 100ms, 1s)")
+	fixedTTL := flag.Bool("fixed-ttl", false, "Use fixed TTL instead of adaptive TTL (only for ttl-reuse strategy)")
 
 	verboseFlag := flag.Bool("verbose", false, "Enable verbose logging")
 	flag.Parse()
@@ -355,8 +356,8 @@ func main() {
 		hosts = append(hosts, "localhost:8080")
 	}
 
-	fmt.Printf("hosts %v\ntheta %.2f\nworkload %s\nsecs %d\nclients %d\nocc %v\ncache-strategy %s\nttl %v\n",
-		hosts, *theta, *workload, *secs, *numClients, *useOCC, *cacheStrategy, *ttl)
+	fmt.Printf("hosts %v\ntheta %.2f\nworkload %s\nsecs %d\nclients %d\nocc %v\ncache-strategy %s\nttl %v\nfixed-ttl %v\n",
+		hosts, *theta, *workload, *secs, *numClients, *useOCC, *cacheStrategy, *ttl, *fixedTTL)
 
 	done := atomic.Bool{}
 
@@ -368,7 +369,11 @@ func main() {
 		case "proactive-invalidation":
 			fmt.Printf("Using Proactive Invalidation cache strategy\n")
 		case "ttl-reuse":
-			fmt.Printf("Using TTL Reuse cache strategy (TTL=%v)\n", *ttl)
+			if *fixedTTL {
+				fmt.Printf("Using TTL Reuse cache strategy (TTL=%v, Fixed)\n", *ttl)
+			} else {
+				fmt.Printf("Using TTL Reuse cache strategy (TTL=%v, Adaptive)\n", *ttl)
+			}
 		case "no-cache":
 			fmt.Printf("Using No-Cache strategy (always fetch from server)\n")
 		default:
@@ -386,7 +391,7 @@ func main() {
 				case "proactive-invalidation":
 					strategy = cache.NewProactiveInvalidationStrategy()
 				case "ttl-reuse":
-					strategy = cache.NewTTLReuseStrategy(*ttl)
+					strategy = cache.NewTTLReuseStrategy(*ttl, *fixedTTL)
 				case "no-cache":
 					strategy = cache.NewNoCacheStrategy()
 				default:
@@ -428,6 +433,46 @@ func main() {
 			go runTransactionClient(hosts, &done, kvs.NewVerificationWorkload(), time.Second*1)
 		}
 	}
+
+	// Start a goroutine to print stats every second
+	go func() {
+		ticker := time.NewTicker(1 * time.Second)
+		defer ticker.Stop()
+		start := time.Now()
+
+		var prevC, prevA, prevH, prevM uint64
+
+		for range ticker.C {
+			if done.Load() {
+				return
+			}
+			elapsed := time.Since(start).Seconds()
+			if *useOCC {
+				currC := occCommits.Load()
+				currA := occAborts.Load()
+				currH := cacheHits.Load()
+				currM := cacheMisses.Load()
+
+				deltaC := currC - prevC
+				deltaA := currA - prevA
+				deltaH := currH - prevH
+				deltaM := currM - prevM
+
+				prevC = currC
+				prevA = currA
+				prevH = currH
+				prevM = currM
+
+				totalDelta := deltaH + deltaM
+				hitRate := 0.0
+				if totalDelta > 0 {
+					hitRate = float64(deltaH) / float64(totalDelta) * 100.0
+				}
+				fmt.Printf("[%.1fs] Commits: %d/s, Aborts: %d/s, Hits: %d/s, Misses: %d/s, HitRate: %.2f%%\n",
+					elapsed, deltaC, deltaA, deltaH, deltaM, hitRate)
+			}
+		}
+	}()
 
 	time.Sleep(time.Duration(*secs) * time.Second)
 	done.Store(true)
