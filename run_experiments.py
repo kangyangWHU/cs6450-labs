@@ -9,7 +9,7 @@ import os
 import re
 import time
 import json
-import csv
+import matplotlib.pyplot as plt
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Tuple
@@ -29,15 +29,17 @@ class MethodArguments:
             self.workload = 'YCSB-A'
         elif self.read_ratio == 0.75:
             self.workload = 'YCSB-C'
+        elif self.read_ratio == 0.25:
+            self.workload = 'YCSB-D'
         else:
             self.workload = 'XFER'
 
 
     def get_args(self) -> dict[str, list[str]]:
         MethodArgs: dict[str, list[str]] = {
-            # "2PL": [f"-clients {self.num_threads_clients} -workload {self.workload} -theta {self.theta} -secs {self.secs}", ""],
+            "2PL": [f"-clients {self.num_threads_clients} -workload {self.workload} -theta {self.theta} -secs {self.secs}", ""],
             "OCC-NoCache": [f"-clients {self.num_threads_clients} -workload {self.workload} -theta {self.theta} -occ -cache-strategy no-cache -secs {self.secs}", "-occ"],
-            # "OCC-DiscardOnAbort": [f"-clients {self.num_threads_clients} -workload {self.workload} -theta {self.theta} -occ -cache-strategy discard-on-abort -secs {self.secs}", "-occ"],
+            "OCC-DiscardOnAbort": [f"-clients {self.num_threads_clients} -workload {self.workload} -theta {self.theta} -occ -cache-strategy discard-on-abort -secs {self.secs}", "-occ"],
             "OCC-Proactive": [f"-clients {self.num_threads_clients} -workload {self.workload} -theta {self.theta} -occ -cache-strategy proactive-invalidation -secs {self.secs}", "-occ"],
             "OCC-TTLFixed10ms": [f"-clients {self.num_threads_clients} -workload {self.workload} -theta {self.theta} -occ -cache-strategy ttl-reuse -ttl 10ms -secs {self.secs} -fixed-ttl", "-occ"],
             "OCC-TTLDynamic10ms": [f"-clients {self.num_threads_clients} -workload {self.workload} -theta {self.theta} -occ -cache-strategy ttl-reuse -ttl 10ms -secs {self.secs}", "-occ"],
@@ -162,11 +164,11 @@ class ExperimentRunner:
             print(f"Error running experiment: {e}")
             return False, ""
     
-    def run_theta_experiments(self, client_count: int, server_count: int, 
-                              num_threads_clients: int, contention_levels: list, 
-                              read_ratio: float, secs: int) -> None:
+    def run_experiments(self, client_count: int, server_count: int, 
+                              num_threads_clients: list, contention_levels: list, 
+                              read_ratios: list, secs: int) -> None:
         """Run all experiments according to the research plan"""
-        
+        return
         # Experiment configurations
         experiments = []
         
@@ -175,8 +177,10 @@ class ExperimentRunner:
         # contention_levels = [0.5]
         # OCC experiments with YCSB-B and different contention
         for theta in contention_levels:
-            all_args = MethodArguments(num_threads_clients=num_threads_clients, read_ratio=read_ratio, theta=theta, secs=secs).get_args()
-            experiments.append(all_args)
+            for read_ratio in read_ratios:
+                for num_threads_client in num_threads_clients:
+                    all_args = MethodArguments(num_threads_clients=num_threads_client, read_ratio=read_ratio, theta=theta, secs=secs).get_args()
+                    experiments.append(all_args)
         
        
         # Store all results
@@ -204,9 +208,14 @@ class ExperimentRunner:
                     results['method'] = key  # Add method name
                     results['log_dir'] = log_dir
                     
-                    # Parse experiment parameters
-                    results['read_ratio'] = read_ratio
+                    # Extract num_threads from client args
+                    if '-clients' in args[0]:
+                        match = re.search(r'-clients (\d+)', args[0])
+                        if match:
+                            results['num_threads'] = int(match.group(1))
                     
+                    results['server_count'] = server_count
+
                     # Extract theta from client args
                     if '-theta' in args[0]:
                         match = re.search(r'-theta ([\d.]+)', args[0])
@@ -226,7 +235,16 @@ class ExperimentRunner:
                         match = re.search(r'-workload (\S+)', args[0])
                         if match:
                             results['workload'] = match.group(1)
-                            
+                            if results['workload'] == 'YCSB-B':
+                                results['read_ratio'] = 0.95
+                            elif results['workload'] == 'YCSB-A':
+                                results['read_ratio'] = 0.5
+                            elif results['workload'] == 'YCSB-C':      
+                                results['read_ratio'] = 0.75
+                            elif results['workload'] == 'YCSB-D':
+                                results['read_ratio'] = 0.25
+                            else:
+                                results['read_ratio'] = 0.0
                     # Check if using OCC
                     if '-occ' in args[0]:
                         results['use_occ'] = True
@@ -258,16 +276,29 @@ class ExperimentRunner:
 
         # Save results
         self.print_summary_table(all_results)
+        
+        # Plot results
+        if len(contention_levels) > 1:
+             self.plot_line('contention level', 'commits_per_sec', all_results)
+             self.plot_line('contention level', 'abort_rate', all_results)
+             self.plot_line('contention level', 'cache_hit_rate', all_results)
+             self.plot_line('contention level', 'cache_hits_per_sec', all_results)
+        
+        if len(read_ratios) > 1:
+             self.plot_line('read ratio', 'commits_per_sec', all_results)
+             self.plot_line('read ratio', 'abort_rate', all_results)
+             self.plot_line('read ratio', 'cache_hit_rate', all_results)
+             self.plot_line('read ratio', 'cache_hits_per_sec', all_results)
+
         # return all_results
 
         # save results to json
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        with open(os.path.join(self.results_dir, f"theta_results_{timestamp}.json"), 'w') as f:
+        with open(os.path.join(self.results_dir, f"results_{timestamp}.json"), 'w') as f:
             json.dump(all_results, f, indent=4)
 
     # def run_workload_experiments(self, client_count: int, server_count: int, 
     #                           num_threads_clients: int, theta: float, secs: int):
-
         
         
     def print_summary_table(self, results: List[List[Dict]]):
@@ -356,6 +387,98 @@ class ExperimentRunner:
         print(f"{'='*140}\n")
 
 
+
+    @staticmethod
+    def plot_line(xfield: str, metric:str, results: List[List[Dict]]):
+        """Plot line graphs for key metrics"""
+        if not results:
+            print("No results to plot")
+            return
+
+        # Flatten results
+        flat_results = []
+        for sublist in results:
+            flat_results.extend(sublist)
+            
+        if not flat_results:
+            print("No results to plot")
+            return
+
+        # Map xfield to key
+        x_key_map = {
+            'contention level': 'theta',
+            'read ratio': 'read_ratio',
+            'num_threads_clients': 'num_threads',
+            'servercount': 'server_count',
+            'sec': 'secs'
+        }
+        
+        x_key = x_key_map.get(xfield, xfield)
+        
+        # Group by method
+        methods = {}
+        for res in flat_results:
+            method = res.get('method', 'Unknown')
+            if method not in methods:
+                methods[method] = []
+            
+            if x_key in res and metric in res:
+                methods[method].append((res[x_key], res[metric]))
+        
+        # Plot
+        plt.figure(figsize=(6, 4))
+        
+        COLORS = ["#be443d", "#1a603c", "#da6200", "#00aab5", "C4", "#800080"]
+        MARKER = ["P", "^", "v", "o", "*", "X"]
+        
+        all_x_values = set()
+        
+        for i, (method, points) in enumerate(methods.items()):
+            if not points:
+                continue
+            # Sort by x
+            points.sort(key=lambda p: p[0])
+            x_vals = [p[0] for p in points]
+            y_vals = [p[1] for p in points]
+            
+            all_x_values.update(x_vals)
+            
+            plt.plot(x_vals, y_vals, marker=MARKER[i % len(MARKER)], color=COLORS[i % len(COLORS)], label=method)
+            
+        # Format labels: remove underscores and capitalize words
+        xlabel = xfield.replace('_', ' ').title()
+        ylabel = metric.replace('_', ' ').title()
+        
+        plt.xlabel(xlabel)
+        plt.ylabel(ylabel)
+        plt.title(f'{ylabel} Vs {xlabel}')
+        plt.legend()
+        plt.grid(True)
+        
+        # if xfield == 'read ratio':
+        plt.xticks(sorted(list(all_x_values)))
+
+        plt.tight_layout()
+        plt.subplots_adjust(
+            top=0.99,
+            bottom= 0.15,
+            left=0.15,
+            right=0.99,
+            hspace=0.2,
+            wspace=0.2
+        )
+        # Save plot
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"plot_{metric}_vs_{xfield.replace(' ', '_')}_{timestamp}.png"
+        
+        save_dir = 'results'
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir, exist_ok=True)
+            
+        plt.savefig(os.path.join(save_dir, filename))
+        print(f"Plot saved to {os.path.join(save_dir, filename)}")
+        plt.close()
+
 def main():
     """Main entry point"""
     runner = ExperimentRunner(root_dir=None)
@@ -373,8 +496,15 @@ def main():
     
     
     # Run all experiments
-    runner.run_theta_experiments(client_count=2, server_count=2,num_threads_clients=50,
-                                  contention_levels=[0.75], read_ratio=0.95, secs=5)
+    runner.run_experiments(client_count=2, server_count=2,num_threads_clients=[10, 20, 30, 40, 50],
+                                  contention_levels=[0.99], read_ratios=[0.95], secs=10)
+
+    with open('/mnt/nfs/dsfinal/cs6450-labs/results/results_20251204_111622.json', 'r') as f:
+        all_results = json.load(f)
+    runner.plot_line('num_threads_clients', 'commits_per_sec', all_results)
+    runner.plot_line('num_threads_clients', 'abort_rate', all_results)
+    runner.plot_line('num_threads_clients', 'cache_hit_rate', all_results)
+    runner.plot_line('num_threads_clients', 'cache_hits_per_sec', all_results)
     print("\nAll experiments completed!")
 
 
