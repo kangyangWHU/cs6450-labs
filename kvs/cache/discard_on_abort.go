@@ -45,9 +45,28 @@ func (s *DiscardOnAbortStrategy) OnServerRead(key string, value string, version 
 
 // OnCommit updates cache with committed writes
 func (s *DiscardOnAbortStrategy) OnCommit(readSet map[string]*CacheEntry, writeSet map[string]*CacheEntry) {
-	// Discard write set entries to avoid stale reads
-	for key := range writeSet {
-		s.Delete(key)
+	for key, entry := range writeSet {
+		// Only update if we read the key (so we know the base version)
+		if _, read := readSet[key]; read {
+			newVersion := entry.Version + 1
+			// Check if we already have a newer version
+			if current, found := s.Get(key); found {
+				if current.Version >= newVersion {
+					continue
+				}
+			}
+
+			newEntry := &CacheEntry{
+				Key:       key,
+				Value:     entry.Value,
+				Version:   newVersion, // Server incremented version
+				Timestamp: time.Now(),
+			}
+			s.Set(key, newEntry)
+		} else {
+			// Blind write: we don't know the server version, so invalidate
+			s.Delete(key)
+		}
 	}
 }
 

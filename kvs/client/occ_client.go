@@ -106,11 +106,13 @@ func (client *OCCClient) OCCBegin() string {
 }
 
 // OCCTxnGet reads a value, using cache if possible
-func (client *OCCClient) OCCTxnGet(txnId string, key string) (string, uint64, bool) {
+func (client *OCCClient) OCCTxnGet(txnId string, key string, bypassCache bool) (string, uint64, bool) {
 	// Try cache first
-	if cachedEntry, found := client.cacheStrategy.OnRead(key); found {
-		cacheHits.Add(1)
-		return cachedEntry.Value, cachedEntry.Version, true
+	if !bypassCache {
+		if cachedEntry, found := client.cacheStrategy.OnRead(key); found {
+			cacheHits.Add(1)
+			return cachedEntry.Value, cachedEntry.Version, true
+		}
 	}
 
 	// Cache miss - fetch from server
@@ -261,7 +263,8 @@ func executeOCCTransaction(dc *OCCDistributedClient, txn kvs.Transaction) bool {
 		txnId := txnIds[serverId]
 
 		if op.OpType == kvs.TxnGet {
-			value, version, found := client.OCCTxnGet(txnId, keyStr)
+			bypassCache := txn.TxnType == kvs.VerificationTxn
+			value, version, found := client.OCCTxnGet(txnId, keyStr, bypassCache)
 			if !found {
 				// Abort all participants
 				for _, pServerId := range participants {

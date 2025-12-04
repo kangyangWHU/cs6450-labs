@@ -35,12 +35,12 @@ class MethodArguments:
 
     def get_args(self) -> dict[str, list[str]]:
         MethodArgs: dict[str, list[str]] = {
-            "2PL": [f"-clients {self.num_threads_clients} -workload {self.workload} -theta {self.theta} -secs {self.secs}", ""],
+            # "2PL": [f"-clients {self.num_threads_clients} -workload {self.workload} -theta {self.theta} -secs {self.secs}", ""],
             "OCC-NoCache": [f"-clients {self.num_threads_clients} -workload {self.workload} -theta {self.theta} -occ -cache-strategy no-cache -secs {self.secs}", "-occ"],
-            "OCC-DiscardOnAbort": [f"-clients {self.num_threads_clients} -workload {self.workload} -theta {self.theta} -occ -cache-strategy discard-on-abort -secs {self.secs}", "-occ"],
+            # "OCC-DiscardOnAbort": [f"-clients {self.num_threads_clients} -workload {self.workload} -theta {self.theta} -occ -cache-strategy discard-on-abort -secs {self.secs}", "-occ"],
             "OCC-Proactive": [f"-clients {self.num_threads_clients} -workload {self.workload} -theta {self.theta} -occ -cache-strategy proactive-invalidation -secs {self.secs}", "-occ"],
-            # "OCC-TTLReuse100": [f"-clients {self.num_threads_clients} -workload {self.workload} -theta {self.theta} -occ -cache-strategy ttl-reuse -ttl 1000ms -secs {self.secs}", "-occ"],
-            # "OCC-TTLReuse10": [f"-clients {self.num_threads_clients} -workload {self.workload} -theta {self.theta} -occ -cache-strategy ttl-reuse -ttl 100ms -secs {self.secs}", "-occ"],
+            "OCC-TTLFixed10ms": [f"-clients {self.num_threads_clients} -workload {self.workload} -theta {self.theta} -occ -cache-strategy ttl-reuse -ttl 10ms -secs {self.secs} -fixed-ttl", "-occ"],
+            "OCC-TTLDynamic10ms": [f"-clients {self.num_threads_clients} -workload {self.workload} -theta {self.theta} -occ -cache-strategy ttl-reuse -ttl 10ms -secs {self.secs}", "-occ"],
         }
 
         return MethodArgs
@@ -163,7 +163,8 @@ class ExperimentRunner:
             return False, ""
     
     def run_theta_experiments(self, client_count: int, server_count: int, 
-                              num_threads_clients: int, read_ratio: float, secs: int) -> None:
+                              num_threads_clients: int, contention_levels: list, 
+                              read_ratio: float, secs: int) -> None:
         """Run all experiments according to the research plan"""
         
         # Experiment configurations
@@ -171,7 +172,7 @@ class ExperimentRunner:
         
         # YCSB-B workload (95% reads, 5% writes) with different contention levels
         # contention_levels = [0.01, 0.25, 0.5, 0.75, 0.99]
-        contention_levels = [0.99]
+        # contention_levels = [0.5]
         # OCC experiments with YCSB-B and different contention
         for theta in contention_levels:
             all_args = MethodArguments(num_threads_clients=num_threads_clients, read_ratio=read_ratio, theta=theta, secs=secs).get_args()
@@ -301,7 +302,7 @@ class ExperimentRunner:
         
         # Get all unique methods in the order they were defined
         # method_order = ["2PL", "OCC-NoCache", "OCC-DiscardOnAbort", "OCC-Proactive", "OCC-TTLReuse100", "OCC-TTLReuse10"]
-        method_order = ["2PL", "OCC-NoCache", "OCC-DiscardOnAbort", "OCC-Proactive"]
+        method_order = ["OCC-NoCache", "OCC-Proactive",  "OCC-TTLFixed10ms", "OCC-TTLDynamic10ms"]
         all_methods = []
         for method in method_order:
             # Check if this method exists in any of the results
@@ -341,16 +342,16 @@ class ExperimentRunner:
         # Print tables for each metric
         # print_metric_table("Commits", "commits", "{:.0f}")
         print_metric_table("Commits/sec", "commits_per_sec", "{:.2f}")
-        print_metric_table("Commit Rate (%)", "commit_rate", "{:.2f}")
+        # print_metric_table("Commit Rate (%)", "commit_rate", "{:.2f}")
         # print_metric_table("Aborts", "aborts", "{:.0f}")
-        print_metric_table("Aborts/sec", "aborts_per_sec", "{:.2f}")
+        # print_metric_table("Aborts/sec", "aborts_per_sec", "{:.2f}")
         print_metric_table("Abort Rate (%)", "abort_rate", "{:.2f}")
         # print_metric_table("Cache Hits", "cache_hits", "{:.0f}")
         print_metric_table("Cache Hits/sec", "cache_hits_per_sec", "{:.2f}")
         print_metric_table("Cache Hit Rate (%)", "cache_hit_rate", "{:.2f}")
         # print_metric_table("Cache Misses", "cache_misses", "{:.0f}")
-        print_metric_table("Cache Misses/sec", "cache_misses_per_sec", "{:.2f}")
-        print_metric_table("Cache Miss Rate (%)", "cache_miss_rate", "{:.2f}")
+        # print_metric_table("Cache Misses/sec", "cache_misses_per_sec", "{:.2f}")
+        # print_metric_table("Cache Miss Rate (%)", "cache_miss_rate", "{:.2f}")
         
         print(f"{'='*140}\n")
 
@@ -359,9 +360,9 @@ def main():
     """Main entry point"""
     runner = ExperimentRunner(root_dir=None)
     
-    print("="*80)
+    print("="*60)
     print("OCC vs 2PL Experiment Runner")
-    print("="*80)
+    print("="*60)
     print("\nThis script will run a comprehensive set of experiments to compare")
     print("OCC with different cache strategies against 2PL baseline.")
     print("\nExperiments include:")
@@ -372,8 +373,8 @@ def main():
     
     
     # Run all experiments
-    runner.run_theta_experiments(client_count=2, server_count=2, 
-                                          num_threads_clients=50, read_ratio=0.75, secs=5)
+    runner.run_theta_experiments(client_count=2, server_count=2,num_threads_clients=50,
+                                  contention_levels=[0.75], read_ratio=0.95, secs=5)
     print("\nAll experiments completed!")
 
 
