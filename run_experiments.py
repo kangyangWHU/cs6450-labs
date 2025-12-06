@@ -448,6 +448,15 @@ class ExperimentRunner:
         # Format labels: remove underscores and capitalize words
         xlabel = xfield.replace('_', ' ').title()
         ylabel = metric.replace('_', ' ').title()
+
+        if ylabel == "Commits Per Sec":
+            ylabel = "Commits/sec"
+        elif ylabel == "Commit Rate":
+            ylabel = "Commit Rate (%)"
+        elif ylabel == "Cache Hit Rate":
+            ylabel = "Cache Hit Rate (%)"
+        elif ylabel == "Cache Hits Per Sec":
+            ylabel = "Cache Hits/sec"
         
         plt.xlabel(xlabel)
         plt.ylabel(ylabel)
@@ -469,7 +478,7 @@ class ExperimentRunner:
         )
         # Save plot
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"plot_{metric}_vs_{xfield.replace(' ', '_')}_{timestamp}.png"
+        filename = f"plot_{metric}_vs_{xfield.replace(' ', '_')}_{timestamp}.pdf"
         
         save_dir = 'results'
         if not os.path.exists(save_dir):
@@ -497,12 +506,12 @@ def main():
     
     # Run all experiments
     runner.run_experiments(client_count=2, server_count=2,num_threads_clients=[10, 20, 30, 40, 50],
-                                  contention_levels=[0.99], read_ratios=[0.95], secs=10)
+                                  contention_levels=[0.99], read_ratios=[0.25], secs=10)
 
-    with open('/mnt/nfs/dsfinal/cs6450-labs/results/results_20251204_111622.json', 'r') as f:
+    with open('/mnt/nfs/dsfinal/cs6450-labs/results/clients/results_20251204_111622.json', 'r') as f:
         all_results = json.load(f)
     runner.plot_line('num_threads_clients', 'commits_per_sec', all_results)
-    runner.plot_line('num_threads_clients', 'abort_rate', all_results)
+    runner.plot_line('num_threads_clients', 'commit_rate', all_results)
     runner.plot_line('num_threads_clients', 'cache_hit_rate', all_results)
     runner.plot_line('num_threads_clients', 'cache_hits_per_sec', all_results)
     print("\nAll experiments completed!")
